@@ -1,7 +1,26 @@
 # Point tracking filter
 
-This project is about processing 3D point tracking data of an infrared LED recorded using a camera system. The data is
-loaded from CSV files.
+This project is about processing 3D point tracking data of an infrared LED recorded using two separate camera systems.
+The data is loaded from CSV files. The recordings from the Luxonis Oak-D stereo camera contain only the positions of the
+LED over time. The Optitrack recordings also contain the positions of three markers attached to the Oak-D camera in a
+rigid formation. This makes it possible to align the reference frames.
+
+## Running
+
+```
+uv sync
+uv run point-tracking-filter
+```
+
+Select recordings in the browser on the left and press "Show in player". Recordings are paired by the leading token of
+their file name (`slow2`, `sweep`, ...), and their time axes are normalized so that the first appearance of the LED is
+`t = 0`.
+
+The transform from the Oak-D marker triangle to the camera's optical center is not fitted from the data. It is
+hand-specified in `config/extrinsic.toml` and editable in the analysis panel. With the default identity extrinsic the
+absolute deviation therefore contains a large systematic component; the "consistency of deviations" analysis quantifies
+how much of it is frame misalignment. On the sample recordings the affine model leaves a residual of a few millimeters,
+while the rigid and similarity models do not, which indicates that the two systems use opposite handedness.
 
 ## Review
 
