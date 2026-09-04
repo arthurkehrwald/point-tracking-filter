@@ -1,0 +1,16 @@
+# Hand-specified transform from the Oak-D marker triangle to the
+# camera's optical center. Identity leaves the marker frame as is.
+#
+# translation      offset in centimeters, applied after the rotation
+# rotation_deg     intrinsic X-Y-Z rotation in degrees
+# axis_permutation which marker-frame axis feeds each camera axis
+# axis_signs       sign flip per camera axis (+1 or -1)
+#
+# The two systems do not necessarily share the same handedness. A single
+# negative sign turns the marker frame into a mirrored one, which is what the
+# rigid and similarity best-fit models cannot compensate for on their own.
+[extrinsic]
+translation = [0.0, 0.0, 0.0]
+rotation_deg = [0.0, 0.0, 0.0]
+axis_permutation = [0, 1, 2]
+axis_signs = [1.0, 1.0, 1.0]
