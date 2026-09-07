@@ -1,16 +1,18 @@
-# Hand-specified transform from the Oak-D marker triangle to the
-# camera's optical center. Identity leaves the marker frame as is.
+# Positions of the three tracking markers in the Oak-D camera space.
+# The origin is the optical center and, seen from the camera,
+# +x points right, +y up and +z forward. Units are centimeters.
 #
-# translation      offset in centimeters, applied after the rotation
-# rotation_deg     intrinsic X-Y-Z rotation in degrees
-# axis_permutation which marker-frame axis feeds each camera axis
-# axis_signs       sign flip per camera axis (+1 or -1)
-#
-# The two systems do not necessarily share the same handedness. A single
-# negative sign turns the marker frame into a mirrored one, which is what the
-# rigid and similarity best-fit models cannot compensate for on their own.
+# The markers form an irregular triangle, so the first three coordinate
+# triplets of an Optitrack recording are assigned to them automatically
+# by matching the side lengths - only one arrangement fits.
 [extrinsic]
-translation = [0.0, 0.0, 0.0]
-rotation_deg = [0.0, 0.0, 0.0]
-axis_permutation = [0, 1, 2]
-axis_signs = [1.0, 1.0, 1.0]
+markers = [
+    [0.3, 2.777, -3.02],
+    [2.8, 5.777, -3.02],
+    [7.2, 2.777, -3.02]
+]
+# +x right, +y up, +z forward is a left-handed convention, while Optitrack's
+# global frame is right-handed, so a pure rotation can never fit both the
+# markers and the LED consistently. Enabling this lets the fit include a
+# reflection, which is required for the shipped recordings.
+allow_reflection = true

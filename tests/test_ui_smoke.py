@@ -112,11 +112,13 @@ def test_extrinsic_round_trip_through_the_panel(window, tmp_path, monkeypatch):
     before = opti.led.xyz.copy()
 
     editor = window.analysis_panel.extrinsic_editor
-    editor.translation[0].setValue(5.0)
+    moved = window.store.extrinsic.markers + np.array([5.0, 0.0, 0.0])
+    for spins, position in zip(editor.markers, moved):
+        spins[0].setValue(float(position[0]))
     editor._save()
 
-    assert saved["e"].translation[0] == pytest.approx(5.0)
-    assert window.store.extrinsic.translation[0] == pytest.approx(5.0)
+    np.testing.assert_allclose(saved["e"].markers, moved)
+    np.testing.assert_allclose(window.store.extrinsic.markers, moved)
 
     reloaded = window.store.load(next(OPTITRACK_DIR.glob("slow2*.csv")))
     shift = np.nanmean(reloaded.led.xyz - before, axis=0)

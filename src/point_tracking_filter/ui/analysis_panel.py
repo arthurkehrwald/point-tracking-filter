@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -45,39 +46,38 @@ class StatsTable(QTableWidget):
 
 
 class ExtrinsicEditor(QGroupBox):
-    """Editor for the hand-specified marker-to-optical-center transform."""
+    """Editor for the marker positions in the Oak-D camera space."""
 
     changed = Signal(CameraExtrinsic)
 
     def __init__(self, extrinsic: CameraExtrinsic) -> None:
-        super().__init__("Camera extrinsic")
+        super().__init__("Marker positions in camera space")
         form = QFormLayout(self)
 
-        self.translation = [self._spin(-500.0, 500.0, 0.1) for _ in AXIS_LABELS]
-        self.rotation = [self._spin(-360.0, 360.0, 1.0) for _ in AXIS_LABELS]
-        self.permutation = []
-        self.signs = []
+        hint = QLabel(
+            "Origin at the optical center, seen from the camera "
+            "+x right, +y up, +z forward. Centimeters."
+        )
+        hint.setWordWrap(True)
+        form.addRow(hint)
 
-        form.addRow("Translation [cm]", self._row(self.translation))
-        form.addRow("Rotation [deg]", self._row(self.rotation))
+        self.markers = [
+            [self._spin(-500.0, 500.0, 0.1) for _ in AXIS_LABELS] for _ in range(3)
+        ]
+        for index, spins in enumerate(self.markers, start=1):
+            form.addRow(f"Marker {index} [cm]", self._row(spins))
 
-        axis_row = QHBoxLayout()
-        for _ in AXIS_LABELS:
-            box = QComboBox()
-            for index, label in enumerate(AXIS_LABELS):
-                box.addItem(label, index)
-            self.permutation.append(box)
-            axis_row.addWidget(box)
-        form.addRow("Axis source", self._wrap(axis_row))
+        self.sides = QLabel()
+        self.sides.setWordWrap(True)
+        form.addRow("Side lengths", self.sides)
 
-        sign_row = QHBoxLayout()
-        for _ in AXIS_LABELS:
-            box = QComboBox()
-            box.addItem("+", 1.0)
-            box.addItem("-", -1.0)
-            self.signs.append(box)
-            sign_row.addWidget(box)
-        form.addRow("Axis sign", self._wrap(sign_row))
+        self.allow_reflection = QCheckBox("Allow reflection (opposite handedness)")
+        self.allow_reflection.setToolTip(
+            "Lets the marker fit mirror an axis instead of only rotating, for the "
+            "case where the camera space and Optitrack's global frame have "
+            "opposite handedness."
+        )
+        form.addRow(self.allow_reflection)
 
         buttons = QHBoxLayout()
         apply_button = QPushButton("Apply")
@@ -111,21 +111,20 @@ class ExtrinsicEditor(QGroupBox):
         return self._wrap(layout)
 
     def set_extrinsic(self, extrinsic: CameraExtrinsic) -> None:
-        for spin, value in zip(self.translation, extrinsic.translation):
-            spin.setValue(value)
-        for spin, value in zip(self.rotation, extrinsic.rotation_deg):
-            spin.setValue(value)
-        for box, value in zip(self.permutation, extrinsic.axis_permutation):
-            box.setCurrentIndex(int(value))
-        for box, value in zip(self.signs, extrinsic.axis_signs):
-            box.setCurrentIndex(0 if value >= 0 else 1)
+        for spins, position in zip(self.markers, extrinsic.markers):
+            for spin, value in zip(spins, position):
+                spin.setValue(float(value))
+        self.allow_reflection.setChecked(extrinsic.allow_reflection)
+        self._show_sides(extrinsic)
+
+    def _show_sides(self, extrinsic: CameraExtrinsic) -> None:
+        lengths = ", ".join(f"{value:.2f}" for value in extrinsic.side_lengths)
+        self.sides.setText(f"{lengths} cm (opposite marker 1, 2, 3)")
 
     def extrinsic(self) -> CameraExtrinsic:
         return CameraExtrinsic(
-            translation=tuple(spin.value() for spin in self.translation),
-            rotation_deg=tuple(spin.value() for spin in self.rotation),
-            axis_permutation=tuple(box.currentData() for box in self.permutation),
-            axis_signs=tuple(box.currentData() for box in self.signs),
+            markers=np.array([[spin.value() for spin in spins] for spins in self.markers]),
+            allow_reflection=self.allow_reflection.isChecked(),
         )
 
     def _emit(self) -> CameraExtrinsic | None:
@@ -135,6 +134,7 @@ class ExtrinsicEditor(QGroupBox):
             self.setToolTip(str(error))
             return None
         self.setToolTip("")
+        self._show_sides(extrinsic)
         self.changed.emit(extrinsic)
         return extrinsic
 

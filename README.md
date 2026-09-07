@@ -16,11 +16,29 @@ Select recordings in the browser on the left and press "Show in player". Recordi
 their file name (`slow2`, `sweep`, ...), and their time axes are normalized so that the first appearance of the LED is
 `t = 0`.
 
-The transform from the Oak-D marker triangle to the camera's optical center is not fitted from the data. It is
-hand-specified in `config/extrinsic.toml` and editable in the analysis panel. With the default identity extrinsic the
-absolute deviation therefore contains a large systematic component; the "consistency of deviations" analysis quantifies
-how much of it is frame misalignment. On the sample recordings the affine model leaves a residual of a few millimeters,
-while the rigid and similarity models do not, which indicates that the two systems use opposite handedness.
+The transform into the camera's reference frame is not fitted from the trajectory data. Instead the positions of the
+three tracking markers are measured by hand in the Oak-D camera's own coordinate space — the origin is the optical
+center and, seen from the camera, `+x` points right, `+y` up and `+z` forward — and stored in `config/extrinsic.toml`
+(editable in the analysis panel).
+
+Because the markers form an irregular triangle, the first three coordinate triplets of an Optitrack recording can be
+assigned to them automatically: the side lengths of the recorded triangle are compared against the measured one and only
+one of the six arrangements fits. On the sample recordings the correct arrangement matches to within 0.02 cm while the
+next-best is 1.45 cm off. A recorded triangle that does not match the measured one, or a triangle too regular to be
+identified, is reported in the warning banner.
+
+The shipped `config/extrinsic.toml` is a placeholder with the right side lengths but a guessed pose, so the absolute
+deviation still contains a systematic component until the real measurements are entered. The "consistency of deviations"
+analysis quantifies how much of the deviation is frame misalignment: on the sample recordings the affine model leaves a
+residual of a few millimeters while the rigid and similarity models do not, which indicates that the two systems use
+opposite handedness.
+
+The `+x` right, `+y` up, `+z` forward convention used for the markers is left-handed, while Optitrack's global frame is
+right-handed, so a pure rotation can never fit both the markers and the LED at once — the marker triangle alone fits
+either way, but everything off that plane (the LED) ends up mirrored. The "Allow reflection" checkbox in the extrinsic
+editor (`allow_reflection` in `config/extrinsic.toml`) lets the fit pick the mirrored solution instead of a pure
+rotation; it is enabled by default in the shipped configuration and reduces the mean rigid-model deviation on the
+sample recordings from over two meters to about 2 cm.
 
 ## Review
 

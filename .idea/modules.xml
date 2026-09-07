@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/point-tracking-filter.iml" filepath="$PROJECT_DIR$/.idea/point-tracking-filter.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/point-tracking-filter@1.iml" filepath="$PROJECT_DIR$/.idea/point-tracking-filter@1.iml" />
     </modules>
   </component>
 </project>

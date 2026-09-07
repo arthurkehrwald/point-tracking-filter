@@ -66,6 +66,7 @@ class RecordingStore:
         self.extrinsic = extrinsic
         paths = list(self.recordings)
         self.recordings.clear()
+        self.warnings.clear()
         for path in paths:
             self.load(path)
 

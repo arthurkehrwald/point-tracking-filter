@@ -47,8 +47,9 @@ The repository currently contains only `README.md`, `pyproject.toml` (no depende
 - The user can nudge the offset manually to correct for a mis-detected first sample.
 
 **Reference-frame alignment**
-- A camera frame is built from the three stationary markers (centroid + orthonormal basis from the marker triangle) and Optitrack points are expressed in that frame.
-- A hand-specified marker-triangle→optical-center extrinsic (translation + rotation, plus axis permutation/sign flips to match Oak-D's camera convention) is applied. It lives in a configuration file, is editable in the UI, and defaults to identity.
+- The extrinsic is the hand-measured position of each of the three tracking markers in the Oak-D camera space: origin at the optical center, seen from the camera `+x` right, `+y` up, `+z` forward. It lives in a configuration file and is editable in the UI.
+- Because the markers form an irregular triangle, the first three Optitrack coordinate triplets are assigned to the measured markers automatically by comparing triangle side lengths — only one of the six arrangements fits. The rigid transform into the camera frame then follows from a Kabsch fit of the matched marker pairs.
+- A recorded triangle that disagrees with the measured one, or one too regular to be matched unambiguously, is reported as a warning.
 - Both datasets are converted to common units (centimeters; Optitrack `Length Units` is honoured).
 - The fitted transform of each pair is cached per pair, since the camera may have been repositioned between takes.
 
@@ -103,7 +104,7 @@ The number of trailing unlabeled triplets varies per file: 1 (`slow2`), 2 (`slow
 2. **Layered core + thin Qt UI**: `core/` is pure numpy/pandas/scipy and Qt-free; `ui/` only renders and wires signals.
 3. **LED reconstruction by column-position convention**: triplets 1–3 are camera markers, all further triplets are LED fragments merged into one track, validated by a stationary-camera / moving-LED sanity check.
 4. **Sync anchored on first LED appearance** in each recording, with a manual nudge as escape hatch.
-5. **Frame alignment from the marker frame plus a hand-specified extrinsic only** — no data-driven fit at this stage. Residual misalignment is *measured* rather than hidden, by the separate "consistency of deviations" best-fit-transform analysis.
+5. **Frame alignment from hand-measured marker positions in camera space**, with the observed markers assigned to them by irregular-triangle side-length matching and a Kabsch fit — no data-driven fit of the trajectories. Residual misalignment is *measured* rather than hidden, by the separate "consistency of deviations" best-fit-transform analysis.
 6. **Alignment cached per recording pair**, because the camera may have moved between takes.
 7. **Smoothing spline per axis over time** (`scipy.interpolate.UnivariateSpline` / `make_smoothing_spline`), so gaps and non-uniform sampling are handled naturally and the smoothing factor is a single tunable scalar.
 
@@ -261,7 +262,7 @@ Paired Oak-D and Optitrack recordings share a common time axis and a common coor
 
 - Implement `core/sync.py`: `normalize_to_led_onset` (first run of consecutive valid LED samples becomes `t = 0`), filename-token based `pair_recordings`, and a `RecordingPair` carrying a user-adjustable offset.
 - Implement `core/align.py`: `marker_frame` building an orthonormal basis and centroid origin from the three markers, raising on collinear markers.
-- Add the `CameraExtrinsic` dataclass with translation, rotation and axis permutation/sign flips, loaded from a new `config/extrinsic.toml` (identity default).
+- Add the `CameraExtrinsic` dataclass holding the three marker positions in camera space, loaded from a new `config/extrinsic.toml`, plus `match_markers`/`rigid_fit` deriving the global→camera transform from them.
 - Implement `to_camera_frame` plus unit conversion to centimeters honouring the Optitrack `Length Units` field.
 - Memoize the resulting transform per recording pair in an `AlignmentCache`.
 - Add `tests/test_sync.py` and `tests/test_align.py` for onset normalization, pairing, and rotation orthonormality.
