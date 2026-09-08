@@ -164,6 +164,7 @@ class MainWindow(QMainWindow):
 
         self.analysis_panel = AnalysisPanel(self.store, self)
         self.analysis_panel.extrinsic_changed.connect(self.on_extrinsic_changed)
+        self.analysis_panel.track_produced.connect(self.on_filtered_track)
         analysis_dock = QDockWidget("Analysis", self)
         analysis_dock.setWidget(self.analysis_panel)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, analysis_dock)

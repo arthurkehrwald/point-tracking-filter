@@ -21,7 +21,13 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.align import CameraExtrinsic, save_extrinsic
-from ..core.analysis import TRANSFORM_MODELS, DeviationStats, consistency_report
+from ..core.analysis import (
+    TRANSFORM_MODELS,
+    ConsistencyReport,
+    DeviationStats,
+    consistency_report,
+    transformed_track,
+)
 from ..core.model import Track
 
 AXIS_LABELS = ("X", "Y", "Z")
@@ -148,11 +154,14 @@ class AnalysisPanel(QWidget):
     """Pair selection, sync nudge, transform model and the statistics tables."""
 
     extrinsic_changed = Signal(CameraExtrinsic)
+    track_produced = Signal(object)
 
     def __init__(self, store, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.store = store
         self.tracks: dict[str, Track] = {}
+        self.report: ConsistencyReport | None = None
+        self._analyzed_track: Track | None = None
 
         self.analyzed_box = QComboBox()
         self.truth_box = QComboBox()
@@ -170,12 +179,17 @@ class AnalysisPanel(QWidget):
         analyze_button = QPushButton("Analyze")
         analyze_button.clicked.connect(self.analyze)
 
+        self.apply_transform_button = QPushButton("Apply transform to copy")
+        self.apply_transform_button.setEnabled(False)
+        self.apply_transform_button.clicked.connect(self.apply_transform)
+
         form = QFormLayout()
         form.addRow("Analyzed", self.analyzed_box)
         form.addRow("Ground truth", self.truth_box)
         form.addRow("Sync offset", self.offset_spin)
         form.addRow("Transform model", self.model_box)
         form.addRow(analyze_button)
+        form.addRow(self.apply_transform_button)
 
         self.before_table = StatsTable("Before")
         self.after_table = StatsTable("After transform")
@@ -236,6 +250,9 @@ class AnalysisPanel(QWidget):
 
         shifted = analyzed.shifted(self.offset_spin.value())
         report = consistency_report(shifted, truth, self.model_box.currentData())
+        self.report = report
+        self._analyzed_track = shifted
+        self.apply_transform_button.setEnabled(True)
 
         self.before_table.show_stats(report.before)
         self.after_table.show_stats(report.after)
@@ -255,3 +272,12 @@ class AnalysisPanel(QWidget):
         ]
         messages.extend(report.warnings)
         self.summary.setText(" ".join(messages))
+
+    def apply_transform(self) -> None:
+        """Create a transformed copy of the analyzed track and add it to the player."""
+        if self.report is None:
+            return
+        corrected = transformed_track(
+            self._analyzed_track, self.report.transform, suffix=f"{self.report.model} fit"
+        )
+        self.track_produced.emit(corrected)
