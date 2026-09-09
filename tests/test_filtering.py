@@ -142,3 +142,82 @@ def test_optimizer_without_ground_truth_raises():
     )
     with pytest.raises(FilterError, match="no valid samples"):
         optimize_spline(noisy, empty)
+
+
+@pytest.mark.parametrize("method", ["fitpack", "gcv", "parametric"])
+def test_every_method_reduces_the_noise(method):
+    clean = _clean()
+    noisy = _noisy(clean)
+    smoothing = 0.05 if method == "gcv" else NOISE**2 * 3
+    filtered = apply_spline_filter(noisy, SplineParams(method=method, smoothing=smoothing))
+
+    assert len(filtered) == len(noisy)
+    np.testing.assert_allclose(filtered.t, noisy.t)
+    assert _rmse(filtered, clean) < 0.5 * _rmse(noisy, clean)
+
+
+@pytest.mark.parametrize("method", ["fitpack", "gcv", "parametric"])
+def test_every_method_preserves_gaps(method):
+    clean = _clean(n=300)
+    noisy = _noisy(clean)
+    noisy.xyz[100:150] = np.nan
+
+    filtered = apply_spline_filter(noisy, SplineParams(method=method))
+    assert np.all(np.isnan(filtered.xyz[100:150]))
+    assert filtered.n_valid == noisy.n_valid
+
+
+@pytest.mark.parametrize("method", ["fitpack", "gcv", "parametric"])
+def test_every_method_supports_resampling_and_weights(method):
+    clean = _clean(n=200)
+    noisy = _noisy(clean)
+    noisy.confidence = RNG.uniform(0.5, 1.0, size=len(noisy))
+
+    filtered = apply_spline_filter(
+        noisy,
+        SplineParams(
+            method=method,
+            smoothing=0.05,
+            use_confidence_weights=True,
+            resample_hz=30.0,
+        ),
+    )
+    assert np.all(np.isfinite(filtered.xyz))
+    assert filtered.confidence is None
+    steps = np.diff(filtered.t)
+    np.testing.assert_allclose(steps, steps[0], atol=1e-9)
+
+
+def test_gcv_automatic_smoothing_reduces_the_noise():
+    clean = _clean()
+    noisy = _noisy(clean)
+    filtered = apply_spline_filter(
+        noisy, SplineParams(method="gcv", auto_smoothing=True)
+    )
+    assert _rmse(filtered, clean) < 0.5 * _rmse(noisy, clean)
+
+
+def test_gcv_requires_at_least_five_samples_per_segment():
+    t = np.arange(4) / 10.0
+    xyz = np.tile(np.arange(4.0)[:, None], (1, 3))
+    track = Track(t=t, xyz=xyz, name="short", source="oak-d")
+
+    filtered = apply_spline_filter(track, SplineParams(method="gcv"))
+    assert filtered.meta["n_passed_through"] == 4
+    assert filtered.meta["n_smoothed"] == 0
+
+
+def test_unknown_method_is_rejected():
+    with pytest.raises(FilterError, match="method"):
+        SplineParams(method="bogus")
+
+
+def test_optimizer_disables_auto_smoothing_on_the_search():
+    clean = _clean(n=400)
+    noisy = _noisy(clean)
+
+    best, cost = optimize_spline(
+        noisy, clean, SplineParams(method="gcv", auto_smoothing=True)
+    )
+    assert best.auto_smoothing is False
+    assert cost < deviation_stats(noisy, clean).euclidean_mean
