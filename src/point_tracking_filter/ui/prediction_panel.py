@@ -1,0 +1,351 @@
+"""Panel for predictive filtering: run variants side by side and compare them.
+
+The point of showing several variants at once is that no single number
+decides between them. A predictor that scores well on deviation can still
+be unusable because its output twitches, so the table reports accuracy and
+smoothness together and the player shows the trajectories on top of each
+other.
+"""
+
+from __future__ import annotations
+
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QGroupBox,
+    QHeaderView,
+    QLabel,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ..core.analysis import AnalysisError, deviation_stats, smoothness_stats
+from ..core.model import Track
+from ..core.prediction import (
+    ConstantVelocityKalman,
+    PredictionError,
+    SmoothedOffset,
+    SpeedScheduledKalman,
+    StreamConfig,
+    ZeroOrderHold,
+    estimate_noise,
+    oracle,
+    simulate,
+    tune,
+)
+
+ORACLE_LABEL = "Offline bound (non-causal)"
+METRIC_COLUMNS = ("Variant", "RMSE [cm]", "95th [cm]", "Jerk", "Step")
+
+
+class PredictionPanel(QWidget):
+    """Causal prediction with a live comparison of the candidate filters."""
+
+    track_produced = Signal(object)
+
+    def __init__(self, store, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.store = store
+        self.tracks: dict[str, Track] = {}
+
+        self.source_box = QComboBox()
+        self.truth_box = QComboBox()
+
+        self.horizon_spin = QDoubleSpinBox()
+        self.horizon_spin.setRange(0.0, 500.0)
+        self.horizon_spin.setValue(50.0)
+        self.horizon_spin.setSingleStep(5.0)
+        self.horizon_spin.setSuffix(" ms")
+        self.horizon_spin.setToolTip(
+            "Latency still ahead of the prediction. The camera's own latency "
+            "is measured from the recording and added on top."
+        )
+
+        self.hold_box = QCheckBox("Hold (no prediction)")
+        self.hold_box.setChecked(True)
+        self.fixed_box = QCheckBox("Kalman, fixed")
+        self.fixed_box.setChecked(True)
+        self.scheduled_box = QCheckBox("Kalman, speed-scheduled")
+        self.scheduled_box.setChecked(True)
+        self.offset_box = QCheckBox("Damp the extrapolated part")
+
+        self.sigma_a_spin = self._noise_spin(7.0, "Process noise of the fixed filter.")
+        self.sigma_slow_spin = self._noise_spin(3.0, "Process noise when nearly still.")
+        self.sigma_fast_spin = self._noise_spin(15.0, "Process noise at full speed.")
+
+        self.offset_tau_spin = QDoubleSpinBox()
+        self.offset_tau_spin.setRange(0.0, 1000.0)
+        self.offset_tau_spin.setValue(100.0)
+        self.offset_tau_spin.setSingleStep(10.0)
+        self.offset_tau_spin.setSuffix(" ms")
+        self.offset_tau_spin.setEnabled(False)
+        self.offset_box.toggled.connect(self.offset_tau_spin.setEnabled)
+
+        self.table = QTableWidget(0, len(METRIC_COLUMNS))
+        self.table.setHorizontalHeaderLabels(METRIC_COLUMNS)
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.setMinimumHeight(120)
+
+        compare_button = QPushButton("Compare variants")
+        compare_button.clicked.connect(self.compare_variants)
+
+        show_button = QPushButton("Show in player")
+        show_button.clicked.connect(self.show_in_player)
+
+        tune_button = QPushButton("Tune on this recording")
+        tune_button.clicked.connect(self.tune_selected)
+
+        estimate_button = QPushButton("Estimate noise from recording")
+        estimate_button.clicked.connect(self.estimate_from_recording)
+
+        self.status = QLabel("No prediction yet.")
+        self.status.setWordWrap(True)
+
+        form = QFormLayout()
+        form.addRow("Source", self.source_box)
+        form.addRow("Reference", self.truth_box)
+        form.addRow("Horizon", self.horizon_spin)
+
+        variants = QGroupBox("Variants")
+        variant_layout = QFormLayout(variants)
+        variant_layout.addRow(self.hold_box)
+        variant_layout.addRow(self.fixed_box, self.sigma_a_spin)
+        variant_layout.addRow(self.scheduled_box)
+        variant_layout.addRow("  slow / fast", self.sigma_slow_spin)
+        variant_layout.addRow("", self.sigma_fast_spin)
+        variant_layout.addRow(self.offset_box, self.offset_tau_spin)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(variants)
+        layout.addWidget(compare_button)
+        layout.addWidget(show_button)
+        layout.addWidget(tune_button)
+        layout.addWidget(estimate_button)
+        layout.addWidget(self.table)
+        layout.addWidget(self.status)
+        layout.addStretch(1)
+
+    @staticmethod
+    def _noise_spin(value: float, tip: str) -> QDoubleSpinBox:
+        spin = QDoubleSpinBox()
+        spin.setDecimals(2)
+        spin.setRange(0.01, 10000.0)
+        spin.setValue(value)
+        spin.setToolTip(tip)
+        return spin
+
+    def refresh(self, tracks: dict[str, Track] | None = None) -> None:
+        if tracks is not None:
+            self.tracks = dict(tracks)
+
+        current = self.source_box.currentData()
+        self.source_box.blockSignals(True)
+        self.source_box.clear()
+        for name, track in self.tracks.items():
+            self.source_box.addItem(f"{name} [{track.source}]", name)
+        index = self.source_box.findData(current)
+        if index < 0:
+            index = self._first_of_source("oak-d")
+        self.source_box.setCurrentIndex(max(index, 0))
+        self.source_box.blockSignals(False)
+
+        chosen = self.truth_box.currentData()
+        self.truth_box.blockSignals(True)
+        self.truth_box.clear()
+        self.truth_box.addItem(ORACLE_LABEL, None)
+        for name, track in self.tracks.items():
+            self.truth_box.addItem(f"{name} [{track.source}]", name)
+        restored = self.truth_box.findData(chosen)
+        self.truth_box.setCurrentIndex(max(restored, 0))
+        self.truth_box.blockSignals(False)
+
+    def _first_of_source(self, source: str) -> int:
+        for index, (_, track) in enumerate(self.tracks.items()):
+            if track.source == source:
+                return index
+        return 0
+
+    def config(self) -> StreamConfig:
+        return StreamConfig(horizon=self.horizon_spin.value() / 1000.0)
+
+    def _source_track(self) -> Track | None:
+        return self.tracks.get(self.source_box.currentData())
+
+    def _reference(self, track: Track, config: StreamConfig) -> Track:
+        """What the variants are scored against.
+
+        Defaults to the offline smoother, which is the best estimate of
+        where the target actually was and is available for every recording;
+        an independently recorded track can be picked instead.
+        """
+        chosen = self.truth_box.currentData()
+        if chosen is not None and chosen in self.tracks:
+            return self.tracks[chosen]
+        return oracle(track, config)
+
+    def predictors(self) -> list:
+        """The variants currently ticked, in table order."""
+        sigma_m, _ = 0.1, None
+        chosen: list = []
+        if self.hold_box.isChecked():
+            chosen.append(ZeroOrderHold())
+        if self.fixed_box.isChecked():
+            chosen.append(
+                ConstantVelocityKalman(
+                    sigma_a=self.sigma_a_spin.value(), sigma_m=sigma_m
+                )
+            )
+        if self.scheduled_box.isChecked():
+            chosen.append(
+                SpeedScheduledKalman(
+                    sigma_slow=self.sigma_slow_spin.value(),
+                    sigma_fast=self.sigma_fast_spin.value(),
+                    sigma_m=sigma_m,
+                )
+            )
+        if not self.offset_box.isChecked():
+            return chosen
+        return [
+            predictor
+            if isinstance(predictor, ZeroOrderHold)
+            else SmoothedOffset(
+                predictor,
+                horizon=self.config().horizon,
+                time_constant=self.offset_tau_spin.value() / 1000.0,
+            )
+            for predictor in chosen
+        ]
+
+    def _run(self) -> tuple[list[Track], Track] | None:
+        track = self._source_track()
+        if track is None:
+            self.status.setText("Load a recording to predict from first.")
+            return None
+        predictors = self.predictors()
+        if not predictors:
+            self.status.setText("Tick at least one variant.")
+            return None
+        config = self.config()
+        try:
+            reference = self._reference(track, config)
+            return [simulate(track, p, config) for p in predictors], reference
+        except (PredictionError, AnalysisError, ValueError) as error:
+            self.status.setText(str(error))
+            return None
+
+    def compare_variants(self) -> None:
+        result = self._run()
+        if result is None:
+            return
+        predicted, reference = result
+
+        self.table.setRowCount(len(predicted))
+        for row, track in enumerate(predicted):
+            accuracy = deviation_stats(track, reference)
+            try:
+                smoothness = smoothness_stats(track, reference)
+                jerk, step = smoothness.jerk_ratio, smoothness.step_ratio
+            except AnalysisError:
+                jerk = step = float("nan")
+            cells = (
+                track.meta.get("predictor", track.name),
+                f"{accuracy.rmse:.3f}",
+                f"{accuracy.p95:.3f}",
+                f"{jerk:.1f}",
+                f"{step:.2f}",
+            )
+            for column, text in enumerate(cells):
+                self.table.setItem(row, column, QTableWidgetItem(text))
+
+        self.status.setText(
+            "Jerk and step are relative to the reference: 1.0 moves exactly as "
+            "much as the real motion, above that is added noise. Lower RMSE with "
+            "a higher jerk means accuracy bought with jitter."
+        )
+
+    def show_in_player(self) -> None:
+        result = self._run()
+        if result is None:
+            return
+        predicted, _ = result
+        for track in predicted:
+            self.track_produced.emit(track)
+        self.compare_variants()
+
+    def tune_selected(self) -> None:
+        """Fit the process noise of whichever Kalman variant is ticked."""
+        track = self._source_track()
+        if track is None:
+            self.status.setText("Load a recording to tune on first.")
+            return
+        if not (self.fixed_box.isChecked() or self.scheduled_box.isChecked()):
+            self.status.setText("Tick a Kalman variant to tune.")
+            return
+
+        config = self.config()
+        try:
+            reference = self._reference(track, config)
+            if self.fixed_box.isChecked():
+                result = tune(
+                    [track],
+                    lambda value: ConstantVelocityKalman(sigma_a=value),
+                    (0.5, 300.0),
+                    config,
+                    [reference],
+                    steps=8,
+                )
+                self.sigma_a_spin.setValue(result.value)
+                label = f"fixed process noise {result.value:.2f}"
+            else:
+                slow = self.sigma_slow_spin.value()
+                result = tune(
+                    [track],
+                    lambda value: SpeedScheduledKalman(
+                        sigma_slow=slow, sigma_fast=value
+                    ),
+                    (max(slow, 1.0), 300.0),
+                    config,
+                    [reference],
+                    steps=8,
+                )
+                self.sigma_fast_spin.setValue(result.value)
+                label = f"fast process noise {result.value:.2f}"
+        except (PredictionError, AnalysisError, ValueError) as error:
+            self.status.setText(str(error))
+            return
+
+        self.compare_variants()
+        self.status.setText(
+            f"Tuned {label} on {track.name} alone, so treat it as a starting "
+            f"point rather than a setting that will hold across recordings."
+        )
+
+    def estimate_from_recording(self) -> None:
+        track = self._source_track()
+        if track is None:
+            self.status.setText("Load a recording to measure first.")
+            return
+        try:
+            sigma_m, sigma_a = estimate_noise(track)
+        except (PredictionError, ValueError) as error:
+            self.status.setText(str(error))
+            return
+
+        self.sigma_a_spin.setValue(min(max(sigma_a, 0.01), 10000.0))
+        self.sigma_slow_spin.setValue(min(max(sigma_a / 2.0, 0.01), 10000.0))
+        self.sigma_fast_spin.setValue(min(max(sigma_a * 4.0, 0.01), 10000.0))
+        self.status.setText(
+            f"Measured {sigma_m:.3f} cm of measurement noise and an acceleration "
+            f"scale of {sigma_a:.1f} on {track.name}. These are seeds for tuning, "
+            f"not tuned values."
+        )

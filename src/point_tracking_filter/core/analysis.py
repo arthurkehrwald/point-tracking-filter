@@ -146,6 +146,136 @@ def stats_from_points(
     )
 
 
+@dataclass
+class SmoothnessStats:
+    """How calm a trajectory is, next to how calm it ought to be.
+
+    Deviation statistics cannot see this: a predictor that twitches around
+    the right answer scores well on mean error yet is unusable on a display.
+    The ratios compare against a reference trajectory, so ``1.0`` means the
+    output moves exactly as much as the real motion does. Above ``1`` the
+    predictor is inventing motion, below ``1`` it is smoothing real motion
+    away.
+    """
+
+    n_samples: int
+    dt: float = float("nan")
+    jerk_rms: float = float("nan")
+    jerk_ratio: float = float("nan")
+    hf_energy: float = float("nan")
+    hf_ratio: float = float("nan")
+    step_p99: float = float("nan")
+    step_ratio: float = float("nan")
+
+    def as_rows(self) -> list[tuple[str, str]]:
+        """Human readable ``(label, value)`` rows for display in a table."""
+        return [
+            ("Samples", f"{self.n_samples}"),
+            ("Jerk RMS [cm/s^3]", f"{self.jerk_rms:.1f}"),
+            ("Jerk ratio", f"{self.jerk_ratio:.2f}"),
+            ("High frequency ratio", f"{self.hf_ratio:.2f}"),
+            ("99th pct step [cm]", f"{self.step_p99:.4f}"),
+            ("Step ratio", f"{self.step_ratio:.2f}"),
+        ]
+
+
+def _finite_runs(mask: np.ndarray) -> list[np.ndarray]:
+    """Index arrays of the contiguous ``True`` runs of ``mask``."""
+    idx = np.flatnonzero(mask)
+    if idx.size == 0:
+        return []
+    breaks = np.flatnonzero(np.diff(idx) != 1)
+    return [part for part in np.split(idx, breaks + 1) if part.size]
+
+
+def _uniform_step(times: np.ndarray, tolerance: float = 0.1) -> float:
+    steps = np.diff(times)
+    if steps.size == 0:
+        raise AnalysisError("a smoothness metric needs at least two samples")
+    step = float(np.median(steps))
+    if not np.isfinite(step) or step <= 0:
+        raise AnalysisError("the time axis is not increasing")
+    if np.max(np.abs(steps - step)) > tolerance * step:
+        raise AnalysisError(
+            "smoothness metrics differentiate the output stream and so need a "
+            "uniform time axis"
+        )
+    return step
+
+
+def _jerk_rms(xyz: np.ndarray, runs: list[np.ndarray], dt: float) -> float:
+    pooled = [np.diff(xyz[run], n=3, axis=0) for run in runs if run.size >= 4]
+    pooled = [d for d in pooled if d.size]
+    if not pooled:
+        return float("nan")
+    stacked = np.vstack(pooled) / dt**3
+    return float(np.sqrt(np.mean(np.sum(stacked**2, axis=1))))
+
+
+def _step_p99(xyz: np.ndarray, runs: list[np.ndarray]) -> float:
+    pooled = [np.diff(xyz[run], axis=0) for run in runs if run.size >= 2]
+    pooled = [d for d in pooled if d.size]
+    if not pooled:
+        return float("nan")
+    return float(np.percentile(np.linalg.norm(np.vstack(pooled), axis=1), 99))
+
+
+def _hf_energy(xyz: np.ndarray, runs: list[np.ndarray], dt: float, cutoff: float) -> float:
+    """Signal power above ``cutoff`` Hz, pooled over the usable runs."""
+    longest = max((run for run in runs), key=len, default=None)
+    if longest is None or longest.size < 8:
+        return float("nan")
+    values = xyz[longest]
+    centered = values - values.mean(axis=0)
+    power = (np.abs(np.fft.rfft(centered, axis=0)) ** 2).sum(axis=1)
+    band = np.fft.rfftfreq(longest.size, dt) >= cutoff
+    if not np.any(band):
+        return float("nan")
+    return float(power[band].sum() / longest.size**2)
+
+
+def smoothness_stats(
+    track: Track,
+    reference: Track | None = None,
+    hf_cutoff: float = 8.0,
+    max_gap: float | None = None,
+) -> SmoothnessStats:
+    """Smoothness of ``track``, optionally relative to ``reference``.
+
+    ``hf_cutoff`` sits above the band real hand motion occupies, so power
+    beyond it is noise the predictor added rather than motion it tracked.
+    """
+    dt = _uniform_step(track.t)
+    mask = track.valid_mask
+    truth = None
+    if reference is not None:
+        truth = resample_to(reference, track.t, max_gap)
+        mask = mask & np.all(np.isfinite(truth), axis=1)
+
+    runs = _finite_runs(mask)
+    n_samples = int(sum(run.size for run in runs))
+    if n_samples == 0:
+        return SmoothnessStats(n_samples=0, dt=dt)
+
+    jerk = _jerk_rms(track.xyz, runs, dt)
+    hf = _hf_energy(track.xyz, runs, dt, hf_cutoff)
+    step = _step_p99(track.xyz, runs)
+
+    stats = SmoothnessStats(
+        n_samples=n_samples, dt=dt, jerk_rms=jerk, hf_energy=hf, step_p99=step
+    )
+    if truth is None:
+        return stats
+
+    reference_jerk = _jerk_rms(truth, runs, dt)
+    reference_hf = _hf_energy(truth, runs, dt, hf_cutoff)
+    reference_step = _step_p99(truth, runs)
+    stats.jerk_ratio = jerk / reference_jerk if reference_jerk > 0 else float("nan")
+    stats.hf_ratio = hf / reference_hf if reference_hf > 0 else float("nan")
+    stats.step_ratio = step / reference_step if reference_step > 0 else float("nan")
+    return stats
+
+
 def apply_transform(transform: np.ndarray, points: np.ndarray) -> np.ndarray:
     """Apply a homogeneous 4x4 transform to ``(N, 3)`` points."""
     points = np.asarray(points, dtype=float).reshape(-1, 3)

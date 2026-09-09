@@ -161,6 +161,7 @@ class MainWindow(QMainWindow):
     def _build_panels(self) -> None:
         from .analysis_panel import AnalysisPanel
         from .filter_panel import FilterPanel
+        from .prediction_panel import PredictionPanel
 
         self.analysis_panel = AnalysisPanel(self.store, self)
         self.analysis_panel.extrinsic_changed.connect(self.on_extrinsic_changed)
@@ -171,9 +172,17 @@ class MainWindow(QMainWindow):
 
         self.filter_panel = FilterPanel(self.store, self)
         self.filter_panel.track_produced.connect(self.on_filtered_track)
-        filter_dock = QDockWidget("Filter", self)
-        filter_dock.setWidget(self.filter_panel)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, filter_dock)
+        self.filter_dock = QDockWidget("Filter", self)
+        self.filter_dock.setWidget(self.filter_panel)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.filter_dock)
+
+        self.prediction_panel = PredictionPanel(self.store, self)
+        self.prediction_panel.track_produced.connect(self.on_filtered_track)
+        self.prediction_dock = QDockWidget("Prediction", self)
+        self.prediction_dock.setWidget(self.prediction_panel)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.prediction_dock)
+        self.tabifyDockWidget(self.filter_dock, self.prediction_dock)
+        self.filter_dock.raise_()
 
     def show_selected(self) -> None:
         paths = self.browser.selected_paths()
@@ -219,6 +228,7 @@ class MainWindow(QMainWindow):
         tracks = self.available_tracks()
         self.analysis_panel.refresh(tracks)
         self.filter_panel.refresh(tracks)
+        self.prediction_panel.refresh(tracks)
 
     def show_warnings(self, messages: list[str]) -> None:
         if not messages:

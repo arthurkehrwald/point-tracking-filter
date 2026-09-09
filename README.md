@@ -72,4 +72,34 @@ spline to the recording data. Three smoothing techniques are available, selectab
 Each spline may be parameterized manually through the user interface or by minimizing mean deviation from a given
 ground truth recording. The result may be displayed along with the original data in the player.
 
-Predictive filtering@
+## Predictive filtering
+
+Offline smoothing may look at the whole recording; a real-time client cannot. The Oak-D takes about 25 ms from shutter
+until a position exists (measured per sample from `detection_time`, median 24.8 ms but with a tail to 30.6 ms), and a
+display adds more, so a reasonable motion-to-photon budget is 50–100 ms. The prediction panel replays a recording as if
+it arrived in real time and asks each candidate filter for the position it cannot yet observe.
+
+The hard part is not accuracy. Extrapolating amplifies noise in the velocity estimate by the horizon, so a predictor can
+improve mean deviation while making the output stream far noisier than the motion it tracks — on `slow2`, naive
+two-sample extrapolation cuts RMSE from 1.76 cm to 1.29 cm while making the output **11× jerkier**. Deviation statistics
+cannot see this, so predictions are also scored on smoothness relative to the offline fit:
+
+- **Jerk ratio** — RMS third difference against the reference. `1.0` moves exactly as much as the real motion does,
+  above that is invented motion, below it is real motion being smoothed away.
+- **Step ratio** — 99th percentile per-frame movement, the most directly perceptual of the three.
+- **High-frequency ratio** — output power above 8 Hz, where real hand motion has little to say.
+
+Predictors are causal by construction and the replay harness enforces it: each one only ever sees samples that had
+arrived by the time it was asked. Available variants are a zero-order hold (the cost of not predicting), a
+constant-velocity Kalman filter, and a speed-scheduled variant whose process noise follows a heavily smoothed speed
+estimate — no single fixed setting suits both regimes, since jitter is worst when the target is nearly still and lag is
+worst when it moves. Either can additionally damp only the extrapolated part of the output, which buys smoothness more
+cheaply than filtering the position would, and fades towards a hold when samples go stale.
+
+Parameters are fitted against the worst recording rather than the average, because averaging lets whichever regime is
+over-represented in the tuning set pick a value that then fails elsewhere. On four held-out recordings every variant
+beats not predicting at all on both accuracy and smoothness; the fixed filter gives the lowest worst-case cost while
+the scheduled one is more accurate but moves more per frame.
+
+Note that a cubic smoothing spline is the two-sided form of the same constant-velocity model, so the offline `gcv`
+filter and the Kalman filter here are the same estimator with and without access to the future.
