@@ -304,6 +304,10 @@ class PlayerWidget(QWidget):
         self.full_trajectory_box = QCheckBox("Full trajectory")
         self.full_trajectory_box.toggled.connect(self.refresh)
 
+        self.show_confidence_box = QCheckBox("Show confidence")
+        self.show_confidence_box.setChecked(True)
+        self.show_confidence_box.toggled.connect(self.refresh)
+
         self.legend = QListWidget()
         self.legend.setMaximumHeight(90)
         self.legend.itemChanged.connect(self._on_legend_changed)
@@ -315,6 +319,7 @@ class PlayerWidget(QWidget):
         controls.addWidget(self.slider, 1)
         controls.addWidget(self.time_label)
         controls.addWidget(self.full_trajectory_box)
+        controls.addWidget(self.show_confidence_box)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.scene, 1)
@@ -401,6 +406,7 @@ class PlayerWidget(QWidget):
 
     def refresh(self) -> None:
         full = self.full_trajectory_box.isChecked()
+        show_confidence = self.show_confidence_box.isChecked()
         tail = DEFAULT_TAIL_SECONDS
         for entry in self.entries.values():
             track = entry.track
@@ -409,8 +415,14 @@ class PlayerWidget(QWidget):
             else:
                 window = (track.t >= self._time - tail) & (track.t <= self._time)
             path = track.xyz[window]
-            confidence = track.confidence[window] if track.confidence is not None else None
+            confidence = (
+                track.confidence[window]
+                if show_confidence and track.confidence is not None
+                else None
+            )
             current, current_confidence = self._sample_at(track, self._time)
+            if not show_confidence:
+                current_confidence = None
             self.scene.update_entry(entry, path, current, confidence, current_confidence)
 
     def _sample_at(

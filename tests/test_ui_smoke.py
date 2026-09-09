@@ -154,6 +154,33 @@ def test_filter_panel_method_switch(window):
     assert filtered.meta["spline_params"].auto_smoothing is True
 
 
+def test_show_confidence_toggle(window):
+    oak = window.store.load(next(OAK_D_DIR.glob("slow2*.csv")))
+    assert oak.led.confidence is not None
+    window.player.add_track(oak.led)
+    window.player.full_trajectory_box.setChecked(True)
+
+    calls = []
+    original = window.player.scene.update_entry
+
+    def spy(entry, path, current, confidence=None, current_confidence=None):
+        calls.append((confidence, current_confidence))
+        return original(entry, path, current, confidence, current_confidence)
+
+    window.player.scene.update_entry = spy
+
+    window.player.show_confidence_box.setChecked(True)
+    window.player.refresh()
+    confidence, current_confidence = calls[-1]
+    assert confidence is not None
+    assert current_confidence is not None
+
+    window.player.show_confidence_box.setChecked(False)
+    confidence, current_confidence = calls[-1]
+    assert confidence is None
+    assert current_confidence is None
+
+
 def test_optimizer_button_runs(window):
     oak = window.store.load(next(OAK_D_DIR.glob("slow2*.csv")))
     opti = window.store.load(next(OPTITRACK_DIR.glob("slow2*.csv")))
