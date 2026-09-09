@@ -60,3 +60,5 @@ other is analyzed in terms of:
 A filter may be applied to the recordings to smooth out noise and triangulation errors. It works by fitting a spline to
 the recording data. This spline may be parameterized manually through the user interface or by minimizing mean deviation
 from a given ground truth recording. The result may be displayed along with the original data in the player.
+
+Predictive filtering

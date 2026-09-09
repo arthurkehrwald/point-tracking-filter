@@ -39,17 +39,39 @@ SPEEDS = (0.25, 0.5, 1.0, 2.0, 4.0)
 DEFAULT_TAIL_SECONDS = 1.5
 
 
-def line_pairs(xyz: np.ndarray) -> np.ndarray:
-    """Consecutive valid point pairs, so gaps are never drawn as lines."""
+def line_pairs(
+    xyz: np.ndarray, confidence: np.ndarray | None = None
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+    """Consecutive valid point pairs, so gaps are never drawn as lines.
+
+    If ``confidence`` is given, also returns the per-vertex confidence
+    (averaged over each segment's endpoints) aligned with the returned pairs.
+    """
     valid = np.all(np.isfinite(xyz), axis=1)
     if xyz.shape[0] < 2:
-        return np.zeros((0, 3))
+        pos = np.zeros((0, 3))
+        return (pos, np.zeros(0)) if confidence is not None else pos
     linked = valid[:-1] & valid[1:]
     if not np.any(linked):
-        return np.zeros((0, 3))
+        pos = np.zeros((0, 3))
+        return (pos, np.zeros(0)) if confidence is not None else pos
     starts = xyz[:-1][linked]
     ends = xyz[1:][linked]
-    return np.stack([starts, ends], axis=1).reshape(-1, 3)
+    pos = np.stack([starts, ends], axis=1).reshape(-1, 3)
+    if confidence is None:
+        return pos
+    segment_confidence = (confidence[:-1][linked] + confidence[1:][linked]) / 2.0
+    return pos, np.repeat(segment_confidence, 2)
+
+
+MIN_CONFIDENCE_ALPHA = 0.15
+MIN_CONFIDENCE = 0.8
+
+
+def confidence_alpha(confidence: np.ndarray | float) -> np.ndarray | float:
+    """Map raw confidence values to an opacity in ``[MIN_CONFIDENCE_ALPHA, 1]``."""
+    remapped_conf = np.clip((confidence - MIN_CONFIDENCE) / (1 - MIN_CONFIDENCE), 0, 1)
+    return MIN_CONFIDENCE_ALPHA + (1.0 - MIN_CONFIDENCE_ALPHA) * remapped_conf
 
 
 @dataclass
@@ -100,14 +122,33 @@ class GLScene(QWidget):
         self.view.addItem(point)
         entry.visuals = {"line": line, "point": point}
 
-    def update_entry(self, entry: TrackEntry, path: np.ndarray, current: np.ndarray | None) -> None:
+    def update_entry(
+        self,
+        entry: TrackEntry,
+        path: np.ndarray,
+        current: np.ndarray | None,
+        confidence: np.ndarray | None = None,
+        current_confidence: float | None = None,
+    ) -> None:
         line = entry.visuals["line"]
         point = entry.visuals["point"]
+        rgb = entry.color
         if entry.visible:
-            line.setData(pos=line_pairs(path))
-            point.setData(
-                pos=np.zeros((0, 3)) if current is None else current.reshape(1, 3)
-            )
+            if confidence is not None:
+                pairs, vertex_confidence = line_pairs(path, confidence)
+                colors = np.zeros((pairs.shape[0], 4))
+                colors[:, :3] = rgb
+                colors[:, 3] = confidence_alpha(vertex_confidence)
+                line.setData(pos=pairs, color=colors)
+            else:
+                line.setData(pos=line_pairs(path), color=(*rgb, 1.0))
+            if current is None:
+                point.setData(pos=np.zeros((0, 3)))
+            else:
+                alpha = (
+                    1.0 if current_confidence is None else float(confidence_alpha(current_confidence))
+                )
+                point.setData(pos=current.reshape(1, 3), color=(*rgb, alpha))
         else:
             line.setData(pos=np.zeros((0, 3)))
             point.setData(pos=np.zeros((0, 3)))
@@ -146,33 +187,65 @@ class ProjectionScene(QWidget):
     def create(self, entry: TrackEntry) -> None:
         pen = pg.mkPen(QColor.fromRgbF(*entry.color), width=2)
         brush = pg.mkBrush(QColor.fromRgbF(*entry.color))
-        curves, markers = [], []
+        curves, markers, confidence_dots = [], [], []
         for plot in self.plots:
             curves.append(plot.plot([], [], pen=pen, connect="finite"))
+            dots = pg.ScatterPlotItem(size=6, pen=None)
+            plot.addItem(dots)
+            confidence_dots.append(dots)
             marker = pg.ScatterPlotItem(size=10, brush=brush, pen=None)
             plot.addItem(marker)
             markers.append(marker)
-        entry.visuals = {"curves": curves, "markers": markers}
+        entry.visuals = {
+            "curves": curves,
+            "markers": markers,
+            "confidence_dots": confidence_dots,
+        }
 
-    def update_entry(self, entry: TrackEntry, path: np.ndarray, current: np.ndarray | None) -> None:
+    def update_entry(
+        self,
+        entry: TrackEntry,
+        path: np.ndarray,
+        current: np.ndarray | None,
+        confidence: np.ndarray | None = None,
+        current_confidence: float | None = None,
+    ) -> None:
+        rgb = entry.color
         for index, (_, _, horizontal, vertical) in enumerate(self.PROJECTIONS):
             curve = entry.visuals["curves"][index]
             marker = entry.visuals["markers"][index]
+            dots = entry.visuals["confidence_dots"][index]
             if entry.visible and path.size:
                 curve.setData(path[:, horizontal], path[:, vertical], connect="finite")
             else:
                 curve.setData([], [])
+            if entry.visible and confidence is not None and path.size:
+                alphas = confidence_alpha(confidence)
+                brushes = [
+                    QColor.fromRgbF(*rgb, float(alpha)) for alpha in alphas
+                ]
+                dots.setData(path[:, horizontal], path[:, vertical], brush=brushes)
+            else:
+                dots.setData([], [])
             if entry.visible and current is not None:
+                alpha = (
+                    1.0 if current_confidence is None else float(confidence_alpha(current_confidence))
+                )
+                marker.setBrush(QColor.fromRgbF(*rgb, alpha))
                 marker.setData([current[horizontal]], [current[vertical]])
             else:
                 marker.setData([], [])
 
     def remove(self, entry: TrackEntry) -> None:
-        for plot, curve, marker in zip(
-            self.plots, entry.visuals.get("curves", []), entry.visuals.get("markers", [])
+        for plot, curve, marker, dots in zip(
+            self.plots,
+            entry.visuals.get("curves", []),
+            entry.visuals.get("markers", []),
+            entry.visuals.get("confidence_dots", []),
         ):
             plot.removeItem(curve)
             plot.removeItem(marker)
+            plot.removeItem(dots)
         entry.visuals = {}
 
     def focus(self, center: np.ndarray, extent: float) -> None:
@@ -268,7 +341,8 @@ class PlayerWidget(QWidget):
         self.scene.create(entry)
         self.entries[track.name] = entry
 
-        item = QListWidgetItem(track.name)
+        label = track.name if track.confidence is None else f"{track.name} (confidence)"
+        item = QListWidgetItem(label)
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         item.setCheckState(Qt.CheckState.Checked)
         item.setForeground(entry.qcolor())
@@ -331,20 +405,29 @@ class PlayerWidget(QWidget):
         for entry in self.entries.values():
             track = entry.track
             if full:
-                path = track.xyz
+                window = np.ones(len(track), dtype=bool)
             else:
                 window = (track.t >= self._time - tail) & (track.t <= self._time)
-                path = track.xyz[window]
-            self.scene.update_entry(entry, path, self._sample_at(track, self._time))
+            path = track.xyz[window]
+            confidence = track.confidence[window] if track.confidence is not None else None
+            current, current_confidence = self._sample_at(track, self._time)
+            self.scene.update_entry(entry, path, current, confidence, current_confidence)
 
-    def _sample_at(self, track: Track, time: float) -> np.ndarray | None:
+    def _sample_at(
+        self, track: Track, time: float
+    ) -> tuple[np.ndarray | None, float | None]:
         if len(track) == 0:
-            return None
+            return None, None
         index = int(np.searchsorted(track.t, time, side="right")) - 1
         if index < 0 or index >= len(track):
-            return None
+            return None, None
         point = track.xyz[index]
-        return point if np.all(np.isfinite(point)) else None
+        if not np.all(np.isfinite(point)):
+            return None, None
+        confidence = (
+            float(track.confidence[index]) if track.confidence is not None else None
+        )
+        return point, confidence
 
     def _recompute_range(self) -> None:
         starts, ends = [], []
