@@ -1,0 +1,94 @@
+\documentclass{siamart251216}
+
+\usepackage{graphicx}
+\usepackage{microtype}
+
+\newcommand{\TheTitle}{Smoothing and Extrapolation of Motion Capture Measurements by Cubic Spline Interpolation}
+\newcommand{\TheAuthors}{Arthur Kehrwald}
+
+\headers{Smoothing and Extrapolation of Motion Capture Measurements}{\TheAuthors}
+
+\title{\TheTitle\thanks{Project in the module Applied Mathematics.}}
+
+\author{Arthur Kehrwald (11135125)\thanks{TH Köln, Master Media Technology, Prof. Dr. Stefan Michael Grünvogel.}}
+
+\begin{document}
+
+\maketitle
+
+\section{Background and Motivation}
+\label{sec:background}
+
+This work originates from the master's project of the winter semester 25/26, in which an interactive system with an autostereoscopic display was developed.
+To adapt the displayed perspective to the viewing position, my fellow students Duy-Anh Do and Randolf Appel programmed tracking software that determines the viewer's eye positions in real time using a stereo camera.
+The software detects eyes reliably and delivers positions with low latency and at a high rate.
+Due to the operating principle of the display (parallax barrier), however, the requirements for accuracy, stability, and latency of the eye positions were too high for our tracking system.
+Even deviations of a few millimeters led to channel separation errors and had to be compensated for by narrowing the barrier aperture.
+In addition, the combined latencies of the stereo camera, the tracking and rendering software, and the display always delayed the displayed perspective by at least 100~ms relative to the current eye positions.
+The end result was a dark, flickering image with a poor depth effect.
+During head movements, the channel separation broke down completely.
+
+\section{Objective}
+\label{sec:objective}
+
+The goal is to simplify and revise the existing tracking system and to evaluate the end result as objectively as possible, independently of our stereo display, using the \emph{Optitrack} motion capture system of TH Köln.
+The focus is on smoothing and extrapolating the triangulated points by cubic spline interpolation.
+This is intended to smooth out the depth errors typical of stereo tracking systems and to compute a future position instead of the position at the time of the last capture, so that a display, if connected, can show an approximately correct perspective even during movements.
+
+\section{Revision of the Tracking Software}
+\label{sec:revision}
+
+First, the software is reduced to the bare essentials:
+The detection of the eyes by a deep learning model and the tracking by optical flow are replaced by a blob detector.
+It is therefore no longer a markerless eye tracking system; instead, the software detects an infrared LED.
+This not only serves the purpose of simplification, but also makes it possible to capture the same LED synchronously with the \emph{Optitrack} motion capture system, as described in \cref{sec:evaluation}.
+The stereo camera \emph{Luxonis Oak-D Pro} is still used, but after manual calibration of the intrinsic and extrinsic camera parameters \cite{luxonis2026}.
+During the master's project, the factory calibration was used.
+The code for retrieving and rectifying the images and for triangulating the 3D coordinates is rewritten, but remains equivalent.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{assets/point-tracker-ui.png}
+  \caption{The user interface of the tracking software. Top left: settings; bottom left: status information. Left of center: the two camera images, each with a crosshair on the LED. Right: the 3D view. The red dot visualizes the computed coordinates. Bottom: a graph of the X (in red), Y (in green), and Z coordinates (in blue) as a function of time.}
+  \label{fig:tracker-ui}
+\end{figure}
+
+A major innovation is the user interface (\cref{fig:tracker-ui}). It shows both camera images, visualizes the detected coordinates as text, in 2D and 3D, both as curves and spatially, and displays several metrics on latency and processing speed.
+These tools make it enormously easier to find optimal parameters for the blob detector and the camera and, if necessary, to adapt them to the ambient conditions and the performance of the computer used.
+With the recording function, which is also new, the coordinates of the LED together with timestamps can be saved in CSV format for further processing and evaluation.
+
+\section{Recording}
+\label{sec:recording}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.6\linewidth]{assets/recording-setup.jpg}
+  \caption{The stereo camera with tracking markers, connected to the recording software on my laptop in the motion capture studio}
+  \label{fig:recording-setup}
+\end{figure}
+
+The signal processing is to be designed and tested on the basis of authentic motion capture data.
+The recording takes place in the motion capture studio at Campus Deutz. For this purpose, the LED is attached to a pair of glasses together with a battery and a switch.
+The test data therefore consist of head movements.
+During the recordings, the LED moves within the area visible to the stereo camera at a distance of approx.\ 30~cm to 3~m.
+To simulate different usage scenarios, there are five recordings of 30 seconds each for two different movement patterns:
+On the one hand, slow movements with longer pauses, as would occur when using a screen, and on the other hand, fast, abrupt movements, as might occur in sports or dance.
+
+\section{Temporal and Spatial Synchronization}
+
+All movements are recorded simultaneously with the stereo camera and the \emph{Optitrack} system.
+The point in time at which the LED first appears in the two recordings is used for temporal synchronization.
+This works because the LED is only switched on once both systems are already recording and the LED is visible to both systems.
+A drawback is that possible differences in the latency of the two recordings are thereby compensated for, and this relevant (but not essential) information remains hidden due to the lack of a common clock.
+
+Three tracking markers attached to the stereo camera allow the \emph{Optitrack} cameras to capture their position and orientation relative to the LED, and thus allow the LED coordinates to be mapped from the coordinate system of one camera system into that of the other by a combination of a translation and a rotation.
+For this, an assignment of the markers must first be made. The mount of the tracking markers is designed such that the markers form a triangle with three clearly different side lengths.
+The rotation matrix $\mathbf{R}$ and the translation vector $\mathbf{t}$ map the positions of the three tracking markers $\mathbf{p_1}, \mathbf{p_2}, \mathbf{p_3}$ determined by the \emph{Optitrack} system onto the positions of the tracking markers in the coordinate system of the stereo camera $\mathbf{p'_1}, \mathbf{p'_2}, \mathbf{p'_3}$, such that $\mathbf{p'_n} = \mathbf{p_n} \mathbf{R} + \mathbf{t}$ holds for $n \in \mathbf{\{1, 2, 3\}}$.
+
+\section{Evaluation}
+\label{sec:evaluation}
+
+\bibliographystyle{siamplain}
+\bibliography{references}
+
+\end{document}
