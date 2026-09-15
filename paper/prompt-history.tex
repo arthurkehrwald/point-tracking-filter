@@ -1,0 +1,157 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{promptbg}{gray}{0.94}
+\newenvironment{prompt}[1]
+  {\par\smallskip\noindent\textsf{\small #1}\par\nopagebreak
+   \begin{list}{}{\leftmargin=1.2em\rightmargin=1.2em}\item\itshape\small}
+  {\end{list}\smallskip}
+
+\setlist{itemsep=2pt,topsep=4pt}
+
+\title{Prompt History and AI-Influenced Design Decisions\\[4pt]
+  \large Attachment to \emph{Smoothing and Extrapolation of Motion Capture Measurements using Cubic Splines}}
+\author{Arthur Kehrwald (11135125)}
+\date{September 2026}
+
+\begin{document}
+
+\maketitle
+
+\section*{Purpose and sources}
+
+This attachment documents how AI coding assistants were used in the project and which design decisions resulted from their output.
+It lists only the prompts that shaped the software or the paper; prompts for small UI adjustments, commits, and clarifying questions are omitted.
+Prompts are quoted verbatim (shortened with [\dots]).
+
+\begin{itemize}
+  \item \textbf{4 September:} initial implementation with the JetBrains Junie agent (commit ``Initial implementation (Opus)'').
+    No transcript of this session exists; its content is reconstructed from the requirements and design plan that the agent stored in the repository (\texttt{.junie/plans}).
+  \item \textbf{9--15 September:} six sessions with Claude Code (Anthropic).
+    The prompts below are taken from the locally stored session transcripts.
+\end{itemize}
+
+All code, numbers, and text produced by the assistants were reviewed by me, and several AI proposals were rejected or later removed, as described below.
+
+\section{Initial implementation (4 September)}
+
+The agent was given a specification of the desired desktop application, including loading both CSV formats, time synchronization, frame alignment, deviation analysis, spline smoothing, and a playback UI.
+Key decisions recorded in the resulting plan:
+\begin{itemize}
+  \item A Qt-free computational core (\texttt{core/}) with a thin PySide6/pyqtgraph UI, so that all algorithms are unit-testable and usable from scripts.
+  \item Temporal synchronization at the first appearance of the LED in both recordings.
+  \item Frame alignment from hand-measured marker positions in the camera frame, with automatic marker assignment by the side lengths of the irregular marker triangle and a Kabsch fit.
+    A data-driven fit of the trajectories was explicitly excluded for calibration; residual misalignment is instead \emph{measured} by a separate best-fit transform analysis.
+    This analysis later became the LED-based alignment used for the evaluation in the paper.
+\end{itemize}
+
+\section{Predictive filtering (9 September)}
+
+\begin{prompt}{Prompt}
+Make a plan to add predictive filtering. The goal is to make the smoothing usable for a real-time system where positions from the future must be predicted based on positions in the past. [\dots] Even more important than making accurate predictions is to not introduce noise with rapidly changing predictions. A client requesting positions 50--100ms in the future should not receive a noisy signal. [\dots] Propose a solution to this problem and how to evaluate the prediction quality in your plan.
+\end{prompt}
+
+Before planning, the assistant measured latency, noise, speed, and acceleration in the recordings.
+It showed that naive two-sample extrapolation improves the RMSE on \emph{slow2} while making the output roughly 11 times jerkier, so accuracy alone is the wrong objective.
+\textbf{Decisions:}
+\begin{itemize}
+  \item Predictions are scored on smoothness as well as accuracy, using the \emph{jerk ratio} and \emph{step ratio} relative to a reference.
+    These metrics are used in the paper.
+  \item Predictors are evaluated in a replay harness that is causal by construction, with the per-sample camera latency taken from the recordings and a fixed display rate.
+    The assistant found and documented that inferring the display rate from the whole recording would make the query schedule non-causal.
+  \item The assistant proposed a constant-velocity Kalman filter as the main predictor and explained that the cubic smoothing spline is the two-sided (non-causal) form of the same estimator, so the offline filter serves as the reference.
+\end{itemize}
+
+\begin{prompt}{Prompt}
+How about using spline extrapolation instead of a Kalman filter? Instead of estimating a spline from the whole trajectory, use only the part in the past. Don't implement it yet. Tell me what you think of this idea.
+\end{prompt}
+
+The assistant raised objections (automatic knot selection changing between frames, extrapolation from the least reliable end of the fit) and then benchmarked both spline variants.
+\textbf{Result and decision:} the spline with adaptive knots (FITPACK) failed completely on a sliding window (RMSE of 643~cm on \emph{sweep}), whereas the GCV smoothing spline with a knot at every sample worked and produced the calmest output on noisy data.
+Only the GCV variant was kept as the \emph{windowed spline refit}, which became the prediction method of the paper.
+
+\begin{prompt}{Prompt}
+[\dots] Also, is it really necessary to select GCV lamda every frame?
+\end{prompt}
+
+The assistant showed that re-selecting $\lambda$ by GCV in every frame made the output 9 times jerkier and used 99.6\% of the 13.3~ms frame budget.
+\textbf{Decision:} the smoothing parameter of the windowed spline is fixed rather than chosen per frame, which the paper states in its prediction section.
+
+During the subsequent tuning, the assistant's hold-out test revealed that averaging the cost over recordings let the slow majority determine the parameter, which then failed on fast recordings.
+It switched to a worst-case objective and additionally implemented a speed-scheduled Kalman filter and output damping.
+
+\section{Paper translation and mathematics (14--15 September)}
+
+\begin{prompt}{Prompt}
+Translate the (unfinished) paper written in typst and german [\dots] to English and use Latex with SIAM Macros [\dots]. Do not add or remove anything from the paper. If you find errors, report them to me, but do not correct them.
+\end{prompt}
+
+The assistant translated the paper, reported spelling and grammar errors in the German original without correcting them, and noted that the requested SIAM class option does not exist.
+
+\begin{prompt}{Prompts}
+Explain how the marker matching from @\url{src/point_tracking_filter/core/align.py} line 124 works in the paper [\dots]. Also include a short formal explanation in mathematical notation [\dots]\\[2pt]
+Explain the kabsch algorithm in the context as used in line 163 of @\url{src/point_tracking_filter/core/align.py} [\dots] with a reference to the original paper if possible.
+\end{prompt}
+
+\textbf{Decisions resulting from the AI output:}
+\begin{itemize}
+  \item The marker assignment is formalized as a minimization over the six permutations of the side lengths, followed by a renumbering of the markers, so that the existing transformation equation remains valid.
+  \item The assistant pointed out that the camera frame (x right, y up, z forward) is left-handed while the \emph{OptiTrack} frame is right-handed.
+    Because three markers always lie in one plane, they cannot decide between a rotation and a reflection.
+    The paper therefore uses the Kabsch solution with $\det \mathbf{R} = -1$, matching the software's \texttt{allow\_reflection} setting.
+\end{itemize}
+
+\section{Simplification of the software (15 September)}
+
+\begin{prompt}{Prompts}
+Remove the speed scheduled kalman and damping predictors. Also Remove any other predictors that are not accessible from the UI.\\[2pt]
+Instead of comparing before and after transform tracks, let the use select any number tracks from the player to compare to the ground truth. This should also make the `compare variants' feature in the prediction panel obsolute. Check if this is correct and remove it if it is.\\[2pt]
+Keep only the `rigid fit' transform model. Remove the others.\\[2pt]
+Keep only the gcv spline filter. Remove the others.
+\end{prompt}
+
+In this phase I reduced the scope that the earlier AI sessions had built up.
+When checking the comparison feature, the assistant confirmed it covered the old ``compare variants'' function except for one case: scoring against the non-causal offline reference.
+It closed that gap before removing the old function.
+
+\section{Remaining paper sections and evaluation (15 September)}
+
+\begin{prompt}{Prompt}
+There are three remaining sections to be written in the paper @paper/main.tex. Filtering should explain how the tracking data is smoothed using gcv splines. Prediction explains how this is adapted to real-time and how the kalman filter that will be compared to it is different. Evaluation should contain metrics about how the filtering and prediction methods perform on the slow and fast recordings, provide mathematical explanations for these findings and judge the effectiveness of the methods. Plan these sections.
+\end{prompt}
+
+The assistant first ran a preliminary evaluation against the \emph{OptiTrack} ground truth and asked about four open points (handling of a faulty recording, how numbers are produced, parameter tuning, and prediction horizons).
+It then drafted the sections and wrote the evaluation script that regenerates all tables and figures.
+\textbf{Findings from the AI output:}
+\begin{itemize}
+  \item The recording \emph{fast1} could not be aligned (RMSE 34.7~cm) and was excluded; I identified the cause as a mistake during recording.
+    The recording description was corrected to four recordings per movement pattern.
+  \item SciPy's GCV selects $\lambda$ separately for each coordinate, contrary to the project README; the paper states the correct behavior.
+  \item Offline GCV smoothing lowers the RMSE by at most 6\% on six of seven recordings.
+    Most of the deviation varies slowly and lies below the spline's cutoff, and a timing offset between the systems was ruled out, so the dominant error is attributed to calibration rather than noise.
+    Outliers are spread out rather than removed by the spline.
+  \item Measured errors were checked against simple error models; the zero-order hold follows $v_{\text{rms}} L$ within about 5\%.
+\end{itemize}
+
+\begin{prompt}{Prompts}
+Remove the Kalman filter comparison from the paper and remove everything related to the kalman filter from the code. I decided it's out of scope.\\[2pt]
+Also cut smoothing parameter duning for the windowed spline and just use a manually set value. (Both in the paper and the code)
+\end{prompt}
+
+\textbf{Decisions (mine, overriding earlier AI proposals):}
+\begin{itemize}
+  \item The Kalman filter, which the assistant had recommended as the main predictor on 9 September, was removed from the code and the paper as out of scope.
+  \item The worst-case parameter tuning was removed; the windowed spline uses a manually set $\lambda = 10^{-4}$.
+    The assistant reported the consequence: at a horizon of 100~ms, the output is now jerkier than simply holding the last sample, which the paper states.
+\end{itemize}
+I also shortened the AI-drafted filtering and evaluation text by hand.
+
+\end{document}
