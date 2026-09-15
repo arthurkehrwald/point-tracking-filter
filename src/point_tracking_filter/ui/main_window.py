@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -166,23 +168,29 @@ class MainWindow(QMainWindow):
         self.analysis_panel = AnalysisPanel(self.store, self)
         self.analysis_panel.extrinsic_changed.connect(self.on_extrinsic_changed)
         self.analysis_panel.track_produced.connect(self.on_filtered_track)
-        analysis_dock = QDockWidget("Analysis", self)
-        analysis_dock.setWidget(self.analysis_panel)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, analysis_dock)
 
         self.filter_panel = FilterPanel(self.store, self)
         self.filter_panel.track_produced.connect(self.on_filtered_track)
-        self.filter_dock = QDockWidget("Filter", self)
-        self.filter_dock.setWidget(self.filter_panel)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.filter_dock)
 
         self.prediction_panel = PredictionPanel(self.store, self)
         self.prediction_panel.track_produced.connect(self.on_filtered_track)
-        self.prediction_dock = QDockWidget("Prediction", self)
-        self.prediction_dock.setWidget(self.prediction_panel)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.prediction_dock)
-        self.tabifyDockWidget(self.filter_dock, self.prediction_dock)
-        self.filter_dock.raise_()
+
+        self.side_tabs = QTabWidget()
+        self.side_tabs.setTabPosition(QTabWidget.TabPosition.North)
+        self.side_tabs.addTab(self._scrollable(self.analysis_panel), "Analysis")
+        self.side_tabs.addTab(self._scrollable(self.filter_panel), "Filter")
+        self.side_tabs.addTab(self._scrollable(self.prediction_panel), "Prediction")
+
+        self.side_dock = QDockWidget("Panels", self)
+        self.side_dock.setWidget(self.side_tabs)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.side_dock)
+
+    @staticmethod
+    def _scrollable(widget: QWidget) -> QScrollArea:
+        scroll = QScrollArea()
+        scroll.setWidget(widget)
+        scroll.setWidgetResizable(True)
+        return scroll
 
     def show_selected(self) -> None:
         paths = self.browser.selected_paths()
