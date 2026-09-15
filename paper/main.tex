@@ -281,13 +281,6 @@ At $h = 0$, the median time between the capture of the newest available sample a
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{assets/prediction-sweep.pdf}
-  \caption{Trade-off between accuracy and smoothness at $h = 50$~ms when varying $\lambda$ of the windowed spline ($10^{-5}$ to $10$). The labels mark the ends of the sweep.}
-  \label{fig:prediction-sweep}
-\end{figure}
-
-\begin{figure}[htbp]
-  \centering
   \includegraphics[width=\linewidth]{assets/prediction-excerpt.pdf}
   \caption{Depth predicted 50~ms ahead during a fast movement. The hold lags behind by the entire lead and shows steps; the windowed spline lags during the acceleration and overshoots when the movement stops.}
   \label{fig:prediction-excerpt}
@@ -300,12 +293,6 @@ At $h = 50$~ms, the prediction is thus more accurate than the hold without any a
 At $h = 0$, the RMSE of 0.64~cm hardly exceeds the mean offline deviation of the raw data of 0.60~cm (\cref{tab:filtering}):
 the remaining error is essentially the systematic triangulation error discussed above, which no predictor can remove.
 Its output is also more than twice as calm as that of the hold (jerk ratio 3.8 versus 9.0 at $h = 0$), although at $h = 100$~ms it becomes jerkier than the hold (15.8 versus 8.9).
-The high jerk ratio of the hold does not depend on $h$ and is caused by its steps:
-since the display frames are not synchronized with the camera frames and the latency varies, some display frames repeat a sample while the next one skips a sample.
-
-The error of the hold follows the approximation $\mathbf{v} L$ from \cref{sec:real-time}.
-With the RMS speed of the slow recordings of 17.9~cm/s, the median lead $L = h + 31$~ms, and the error floor $b = 0.60$~cm combined in quadrature, $(b^2 + v_{\text{rms}}^2 L^2)^{1/2}$ predicts 0.82, 1.57, and 2.42~cm for the three horizons, compared with the measured 0.84, 1.61, and 2.47~cm.
-Since the accelerations of slow movements are small, extrapolating the spline over this lead remains accurate, which explains why prediction halves the error here.
 
 \paragraph{Fast movements}
 For fast movements, the benefit is small.
@@ -313,10 +300,6 @@ The windowed spline reduces the RMSE by 25\% at $h = 0$ (4.24 to 3.16~cm) and by
 The hold approximation again matches: with an RMS speed of 121.8~cm/s, $v_{\text{rms}} L$ predicts 3.8, 9.9, and 16.0~cm, compared with the measured 4.24, 9.98, and 15.50~cm.
 Over leads of 80 to 130~ms, the accelerations of fast head movements, which change their sign within a fraction of a second, can no longer be neglected.
 \Cref{fig:prediction-excerpt} shows the result: the prediction lags during the acceleration and overshoots by several centimeters when the movement stops.
-
-The sweep in \cref{fig:prediction-sweep} shows that no choice of $\lambda$ resolves this.
-Large values of $\lambda$ turn the fit into a least squares line over the whole window, whose velocity refers to the middle of the window and thus lags by $W/2 = 150$~ms, while very small values make the output unstable (jerk ratio 31 and 121 at $\lambda = 10^{-5}$).
-Of the values in the sweep, the one used here, $\lambda = 10^{-4}$, is the most accurate for both movement patterns, and it still leaves an RMSE of 8.1~cm for the fast recordings.
 
 \subsection{Conclusion}
 
