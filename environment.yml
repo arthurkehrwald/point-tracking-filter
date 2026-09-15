@@ -1,0 +1,20 @@
+name: point-tracking-filter
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.12
+  - numpy>=2.0
+  - pandas>=2.2
+  - scipy>=1.14
+  - scipy-stubs
+  # dev
+  - matplotlib-base>=3.10
+  - pytest>=8.0
+  - pip
+  - pip:
+      # The Qt stack comes from PyPI rather than conda-forge: conda-forge's Qt pulls in its own libdrm, which shadows the
+      # system one and breaks OpenGL on distributions with a newer Mesa ("Could not initialize GLX").
+      - pyside6>=6.7
+      - pyqtgraph>=0.13
+      - pyopengl>=3.1
+      - -e .

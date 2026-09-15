@@ -7,9 +7,40 @@ rigid formation. This makes it possible to align the reference frames.
 
 ## Running
 
+The project can be run with either [uv](https://docs.astral.sh/uv/) or conda (Anaconda, Miniconda, Miniforge or
+micromamba). Both need Python 3.12 or newer.
+
+### With uv
+
 ```
 uv sync
 uv run point-tracking-filter
+```
+
+### With conda
+
+From the repository root:
+
+```
+conda env create -f environment.yml
+conda activate point-tracking-filter
+point-tracking-filter
+```
+
+`environment.yml` installs the scientific stack from conda-forge and the Qt stack (PySide6, pyqtgraph, PyOpenGL) from
+PyPI via pip. Qt from conda-forge brings its own `libdrm`, which breaks OpenGL on systems with a newer Mesa driver
+("Could not initialize GLX"), so do not replace those pip packages with their conda equivalents.
+
+The package is installed in editable mode because the application finds `config/` and `recordings/` relative to its
+source checkout, so keep the environment pointing at this clone. After the dependencies change, update the environment
+with `conda env update -f environment.yml --prune`.
+
+The tests and the evaluation script, which regenerates the figures in `paper/assets`, run inside the activated
+environment:
+
+```
+pytest
+python scripts/evaluate.py
 ```
 
 Select recordings in the browser on the left and press "Show in player". Recordings are paired by the leading token of
