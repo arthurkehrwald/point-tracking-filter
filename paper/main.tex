@@ -84,12 +84,10 @@ A drawback is that possible differences in the latency of the two recordings are
 
 Three tracking markers attached to the stereo camera allow the \emph{OptiTrack} cameras to capture their position and orientation relative to the LED.
 They thus allow the LED coordinates to be mapped from the coordinate system of one camera system into that of the other by a combination of a translation and a rotation.
-For this, an assignment of the markers must first be made.
+For this, each marker in the \emph{OAK-D} recording must be matched with the corresponding marker in the \emph{OptiTrack} recording.
 The mount of the tracking markers is designed such that the markers form a triangle with three clearly different side lengths.
 Each marker can therefore be identified by the length of the triangle side opposite to it, which does not depend on the order in which the markers are numbered.
-Of the six possible assignments of the markers measured by the \emph{OptiTrack} system to the marker positions measured by hand in the coordinate system of the stereo camera, the one for which these side lengths agree best is chosen.
-If the second-best assignment is worse by less than 0.5~cm, the assignment is considered ambiguous and a warning is issued.
-For this reason, only marker geometries whose side lengths differ pairwise by at least 0.5~cm are accepted.
+Of the six possible assignments of the markers, the one for which these side lengths agree best is chosen.
 
 Formally, let $s_i = \lVert \mathbf{p_j} - \mathbf{p_k} \rVert$ and $s'_i = \lVert \mathbf{p'_j} - \mathbf{p'_k} \rVert$ with $\{i, j, k\} = \{1, 2, 3\}$ denote the side lengths opposite to marker $i$.
 With $S_3$ the set of all permutations of $\{1, 2, 3\}$, the assignment is
@@ -102,6 +100,8 @@ so that the marker $\mathbf{p}_{\sigma^*(n)}$ corresponds to $\mathbf{p'_n}$.
 The \emph{OptiTrack} markers are renumbered accordingly, so that in the following $\mathbf{p_n}$ refers to $\mathbf{p}_{\sigma^*(n)}$.
 
 The rotation matrix $\mathbf{R}$ and the translation vector $\mathbf{t}$ map the positions of the three tracking markers $\mathbf{p_1}, \mathbf{p_2}, \mathbf{p_3}$ determined by the \emph{OptiTrack} system onto the positions of the tracking markers in the coordinate system of the stereo camera $\mathbf{p'_1}, \mathbf{p'_2}, \mathbf{p'_3}$, such that $\mathbf{p'_n} = \mathbf{R} \mathbf{p_n}+ \mathbf{t}$ holds for $n \in \{1, 2, 3\}$.
+The coordinate system of the stereo camera has its origin at the optical center of the left camera lens, with the axes defined as x right, y up, and z forward from the point of view of the camera.
+The tracking markers are rigidly attached to the camera, such that their positions can simply be measured once in the CAD model of the tracking marker mount and treated as constants.
 
 \section{Evaluation}
 \label{sec:evaluation}
