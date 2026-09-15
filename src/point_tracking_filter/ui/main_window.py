@@ -158,6 +158,9 @@ class MainWindow(QMainWindow):
         clear_button.clicked.connect(self.player.clear)
         layout.addWidget(clear_button)
 
+        layout.addWidget(QLabel("In player"))
+        layout.addWidget(self.player.legend, 1)
+
         self.browser.setWidget(container)
 
     def _build_panels(self) -> None:

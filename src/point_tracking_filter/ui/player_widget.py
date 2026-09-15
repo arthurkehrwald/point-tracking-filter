@@ -309,7 +309,7 @@ class PlayerWidget(QWidget):
         self.show_confidence_box.toggled.connect(self.refresh)
 
         self.legend = QListWidget()
-        self.legend.setMaximumHeight(90)
+        self.legend.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.legend.itemChanged.connect(self._on_legend_changed)
 
         controls = QHBoxLayout()
@@ -324,7 +324,6 @@ class PlayerWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(self.scene, 1)
         layout.addLayout(controls)
-        layout.addWidget(self.legend)
 
         if not self.using_opengl:
             banner = QLabel(
