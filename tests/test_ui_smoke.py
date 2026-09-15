@@ -194,38 +194,17 @@ def test_prediction_panel_shows_variants_side_by_side(window):
     names = window.player.track_names()
     assert oak.led.name in names
     predicted = [name for name in names if "+50 ms" in name]
-    assert len(predicted) == 3
+    assert len(predicted) == 2
     assert any("Constant-velocity" in name for name in predicted)
-    assert any("Speed-scheduled" in name for name in predicted)
 
-    assert panel.table.rowCount() == 3
-    labels = [panel.table.item(row, 0).text() for row in range(3)]
+    assert panel.table.rowCount() == 2
+    labels = [panel.table.item(row, 0).text() for row in range(2)]
     assert "Zero-order hold" in labels
     # Accuracy and smoothness are reported together, since either alone can
     # pick a predictor that is unusable on the other axis.
-    for row in range(3):
+    for row in range(2):
         for column in range(1, panel.table.columnCount()):
             assert panel.table.item(row, column).text() not in ("", "nan")
-
-
-def test_prediction_panel_offset_damping_changes_the_variants(window):
-    oak = window.store.load(next(OAK_D_DIR.glob("slow2*.csv")))
-    window.player.add_track(oak.led)
-    window.refresh_panels()
-
-    panel = window.prediction_panel
-    panel.source_box.setCurrentIndex(panel.source_box.findData(oak.led.name))
-    panel.scheduled_box.setChecked(False)
-    panel.hold_box.setChecked(False)
-
-    panel.compare_variants()
-    plain = float(panel.table.item(0, 3).text())
-
-    panel.offset_box.setChecked(True)
-    assert panel.offset_tau_spin.isEnabled()
-    panel.compare_variants()
-    assert "smoothed offset" in panel.table.item(0, 0).text()
-    assert float(panel.table.item(0, 3).text()) < plain
 
 
 def test_prediction_panel_estimates_and_tunes(window):
@@ -240,7 +219,6 @@ def test_prediction_panel_estimates_and_tunes(window):
     assert "measurement noise" in panel.status.text()
     assert panel.sigma_a_spin.value() > 0
 
-    panel.scheduled_box.setChecked(False)
     panel.tune_selected()
     assert "Tuned fixed process noise" in panel.status.text()
     assert 0.5 <= panel.sigma_a_spin.value() <= 300.0

@@ -30,8 +30,6 @@ from ..core.model import Track
 from ..core.prediction import (
     ConstantVelocityKalman,
     PredictionError,
-    SmoothedOffset,
-    SpeedScheduledKalman,
     StreamConfig,
     WindowedSplineRefit,
     ZeroOrderHold,
@@ -72,14 +70,9 @@ class PredictionPanel(QWidget):
         self.hold_box.setChecked(True)
         self.fixed_box = QCheckBox("Kalman, fixed")
         self.fixed_box.setChecked(True)
-        self.scheduled_box = QCheckBox("Kalman, speed-scheduled")
-        self.scheduled_box.setChecked(True)
         self.spline_box = QCheckBox("Windowed spline refit")
-        self.offset_box = QCheckBox("Damp the extrapolated part")
 
         self.sigma_a_spin = self._noise_spin(7.0, "Process noise of the fixed filter.")
-        self.sigma_slow_spin = self._noise_spin(3.0, "Process noise when nearly still.")
-        self.sigma_fast_spin = self._noise_spin(15.0, "Process noise at full speed.")
 
         self.spline_window_spin = QDoubleSpinBox()
         self.spline_window_spin.setRange(10.0, 2000.0)
@@ -94,14 +87,6 @@ class PredictionPanel(QWidget):
         self.spline_smoothing_spin.setValue(0.05)
         self.spline_smoothing_spin.setSingleStep(0.01)
         self.spline_smoothing_spin.setToolTip("Smoothing penalty passed to the GCV spline backend.")
-
-        self.offset_tau_spin = QDoubleSpinBox()
-        self.offset_tau_spin.setRange(0.0, 1000.0)
-        self.offset_tau_spin.setValue(100.0)
-        self.offset_tau_spin.setSingleStep(10.0)
-        self.offset_tau_spin.setSuffix(" ms")
-        self.offset_tau_spin.setEnabled(False)
-        self.offset_box.toggled.connect(self.offset_tau_spin.setEnabled)
 
         self.table = QTableWidget(0, len(METRIC_COLUMNS))
         self.table.setHorizontalHeaderLabels(METRIC_COLUMNS)
@@ -135,12 +120,8 @@ class PredictionPanel(QWidget):
         variant_layout = QFormLayout(variants)
         variant_layout.addRow(self.hold_box)
         variant_layout.addRow(self.fixed_box, self.sigma_a_spin)
-        variant_layout.addRow(self.scheduled_box)
-        variant_layout.addRow("  slow / fast", self.sigma_slow_spin)
-        variant_layout.addRow("", self.sigma_fast_spin)
         variant_layout.addRow(self.spline_box, self.spline_window_spin)
         variant_layout.addRow("  smoothing", self.spline_smoothing_spin)
-        variant_layout.addRow(self.offset_box, self.offset_tau_spin)
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
@@ -213,7 +194,7 @@ class PredictionPanel(QWidget):
 
     def predictors(self) -> list:
         """The variants currently ticked, in table order."""
-        sigma_m, _ = 0.1, None
+        sigma_m = 0.1
         chosen: list = []
         if self.hold_box.isChecked():
             chosen.append(ZeroOrderHold())
@@ -223,14 +204,6 @@ class PredictionPanel(QWidget):
                     sigma_a=self.sigma_a_spin.value(), sigma_m=sigma_m
                 )
             )
-        if self.scheduled_box.isChecked():
-            chosen.append(
-                SpeedScheduledKalman(
-                    sigma_slow=self.sigma_slow_spin.value(),
-                    sigma_fast=self.sigma_fast_spin.value(),
-                    sigma_m=sigma_m,
-                )
-            )
         if self.spline_box.isChecked():
             chosen.append(
                 WindowedSplineRefit(
@@ -238,18 +211,7 @@ class PredictionPanel(QWidget):
                     smoothing=self.spline_smoothing_spin.value(),
                 )
             )
-        if not self.offset_box.isChecked():
-            return chosen
-        return [
-            predictor
-            if isinstance(predictor, ZeroOrderHold)
-            else SmoothedOffset(
-                predictor,
-                horizon=self.config().horizon,
-                time_constant=self.offset_tau_spin.value() / 1000.0,
-            )
-            for predictor in chosen
-        ]
+        return chosen
 
     def _run(self) -> tuple[list[Track], Track] | None:
         track = self._source_track()
@@ -308,43 +270,28 @@ class PredictionPanel(QWidget):
         self.compare_variants()
 
     def tune_selected(self) -> None:
-        """Fit the process noise of whichever Kalman variant is ticked."""
+        """Fit the process noise of the fixed Kalman variant."""
         track = self._source_track()
         if track is None:
             self.status.setText("Load a recording to tune on first.")
             return
-        if not (self.fixed_box.isChecked() or self.scheduled_box.isChecked()):
-            self.status.setText("Tick a Kalman variant to tune.")
+        if not self.fixed_box.isChecked():
+            self.status.setText("Tick the Kalman variant to tune.")
             return
 
         config = self.config()
         try:
             reference = self._reference(track, config)
-            if self.fixed_box.isChecked():
-                result = tune(
-                    [track],
-                    lambda value: ConstantVelocityKalman(sigma_a=value),
-                    (0.5, 300.0),
-                    config,
-                    [reference],
-                    steps=8,
-                )
-                self.sigma_a_spin.setValue(result.value)
-                label = f"fixed process noise {result.value:.2f}"
-            else:
-                slow = self.sigma_slow_spin.value()
-                result = tune(
-                    [track],
-                    lambda value: SpeedScheduledKalman(
-                        sigma_slow=slow, sigma_fast=value
-                    ),
-                    (max(slow, 1.0), 300.0),
-                    config,
-                    [reference],
-                    steps=8,
-                )
-                self.sigma_fast_spin.setValue(result.value)
-                label = f"fast process noise {result.value:.2f}"
+            result = tune(
+                [track],
+                lambda value: ConstantVelocityKalman(sigma_a=value),
+                (0.5, 300.0),
+                config,
+                [reference],
+                steps=8,
+            )
+            self.sigma_a_spin.setValue(result.value)
+            label = f"fixed process noise {result.value:.2f}"
         except (PredictionError, AnalysisError, ValueError) as error:
             self.status.setText(str(error))
             return
@@ -367,8 +314,6 @@ class PredictionPanel(QWidget):
             return
 
         self.sigma_a_spin.setValue(min(max(sigma_a, 0.01), 10000.0))
-        self.sigma_slow_spin.setValue(min(max(sigma_a / 2.0, 0.01), 10000.0))
-        self.sigma_fast_spin.setValue(min(max(sigma_a * 4.0, 0.01), 10000.0))
         self.status.setText(
             f"Measured {sigma_m:.3f} cm of measurement noise and an acceleration "
             f"scale of {sigma_a:.1f} on {track.name}. These are seeds for tuning, "

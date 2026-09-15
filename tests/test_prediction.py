@@ -8,13 +8,9 @@ from point_tracking_filter.core.model import Track
 from point_tracking_filter.core.prediction import (
     DEFAULT_CAMERA_LATENCY,
     ConstantVelocityKalman,
-    NaiveDifference,
     PredictionError,
     Score,
-    SmoothedOffset,
-    SpeedScheduledKalman,
     StreamConfig,
-    WindowedPolynomial,
     WindowedSplineRefit,
     ZeroOrderHold,
     compare,
@@ -24,7 +20,6 @@ from point_tracking_filter.core.prediction import (
     output_times,
     references_for,
     sample_latency,
-    schedule_wobble,
     score,
     simulate,
     tune,
@@ -34,12 +29,7 @@ from point_tracking_filter.core.prediction import (
 def _every_predictor() -> list:
     return [
         ZeroOrderHold(),
-        NaiveDifference(),
         ConstantVelocityKalman(),
-        SpeedScheduledKalman(),
-        SmoothedOffset(ConstantVelocityKalman(), horizon=0.05),
-        WindowedPolynomial(degree=1),
-        WindowedPolynomial(degree=2),
         WindowedSplineRefit(backend="gcv"),
         WindowedSplineRefit(backend="parametric"),
     ]
@@ -75,11 +65,11 @@ def test_prediction_never_looks_ahead():
         horizon=0.05, camera_latency=DEFAULT_CAMERA_LATENCY, output_hz=RATE
     )
 
-    full = simulate(track, NaiveDifference(), config)
+    full = simulate(track, ConstantVelocityKalman(), config)
     half = len(track) // 2
     truncated = simulate(
         Track(t=track.t[:half], xyz=track.xyz[:half], name="cut", source="oak-d"),
-        NaiveDifference(),
+        ConstantVelocityKalman(),
         config,
     )
 
@@ -99,16 +89,6 @@ def test_output_grid_is_uniform_and_targets_the_horizon():
     # The first query happens once the first sample has arrived, and asks for
     # the position one horizon later.
     assert out.t[0] == pytest.approx(track.t[0] + 0.025 + 0.05)
-
-
-def test_constant_velocity_is_predicted_exactly():
-    track = _ramp(velocity=10.0)
-    config = StreamConfig(horizon=0.05, camera_latency=0.025)
-    out = simulate(track, NaiveDifference(), config)
-
-    truth = np.column_stack([out.t * 10.0, np.zeros(len(out)), np.ones(len(out))])
-    # The first two outputs are the warm-up: velocity needs two samples.
-    np.testing.assert_allclose(out.xyz[2:], truth[2:], atol=1e-9)
 
 
 def test_zero_order_hold_lags_by_the_whole_latency():
@@ -271,26 +251,6 @@ def test_constant_velocity_is_recovered_by_every_family(predictor):
     assert np.max(np.abs(settled)) < 1e-6
 
 
-def test_windowed_polynomial_fits_curvature_exactly():
-    n = 300
-    t = np.arange(n) / RATE
-    track = Track(
-        t=t,
-        xyz=np.column_stack([3.0 * t**2 - t, np.zeros(n), np.zeros(n)]),
-        name="parabola",
-        source="oak-d",
-    )
-    config = StreamConfig(horizon=0.05, camera_latency=0.0, output_hz=RATE)
-
-    quadratic = simulate(track, WindowedPolynomial(degree=2), config)
-    truth = 3.0 * quadratic.t**2 - quadratic.t
-    np.testing.assert_allclose(quadratic.xyz[20:, 0], truth[20:], atol=1e-8)
-
-    # A straight-line model cannot, and must lag instead.
-    linear = simulate(track, WindowedPolynomial(degree=1), config)
-    assert np.max(np.abs(linear.xyz[20:, 0] - truth[20:])) > 0.05
-
-
 def test_kalman_process_noise_trades_lag_against_jitter():
     rng = np.random.default_rng(5)
     track = _wobble(n=600)
@@ -326,10 +286,6 @@ def test_predictor_arguments_are_validated():
         ConstantVelocityKalman(sigma_a=0.0)
     with pytest.raises(PredictionError, match="sigma_m"):
         ConstantVelocityKalman(sigma_m=-1.0)
-    with pytest.raises(PredictionError, match="degree"):
-        WindowedPolynomial(degree=9)
-    with pytest.raises(PredictionError, match="window_seconds"):
-        WindowedPolynomial(window_seconds=0.0)
     with pytest.raises(PredictionError, match="backend"):
         WindowedSplineRefit(backend="nope")
 
@@ -337,7 +293,7 @@ def test_predictor_arguments_are_validated():
 def test_compare_reports_every_pairing():
     track = _wobble(n=200)
     config = StreamConfig(horizon=0.05, camera_latency=0.025, output_hz=RATE)
-    predictors = [ZeroOrderHold(), ConstantVelocityKalman(), WindowedPolynomial()]
+    predictors = [ZeroOrderHold(), ConstantVelocityKalman(), WindowedSplineRefit()]
 
     rows = compare([track], predictors, config)
     assert len(rows) == 3
@@ -364,119 +320,6 @@ def test_estimate_noise_recovers_the_measurement_scale():
     sigma_m, sigma_a = estimate_noise(noisy)
     assert sigma_m == pytest.approx(0.2, rel=0.35)
     assert sigma_a > 0
-
-
-def test_smoothed_offset_calms_its_inner_predictor():
-    track = _noisy_wobble()
-    config = StreamConfig(horizon=0.05, camera_latency=0.025, output_hz=RATE)
-    reference = oracle(track, config)
-
-    bare = ConstantVelocityKalman(sigma_a=200.0)
-    wrapped = SmoothedOffset(
-        ConstantVelocityKalman(sigma_a=200.0), horizon=0.05, time_constant=0.12
-    )
-    plain = smoothness_stats(simulate(track, bare, config), reference)
-    damped = smoothness_stats(simulate(track, wrapped, config), reference)
-
-    # Damping only the extrapolated part, at identical process noise.
-    assert damped.jerk_ratio < plain.jerk_ratio
-
-
-def _mid_dropout(n: int = 400, lost: slice = slice(150, 260)) -> Track:
-    """A ramp with a hole in the middle.
-
-    The hole must not be at the end: the harness stops querying once the
-    last valid sample has arrived, so a trailing dropout is never actually
-    observed by the client.
-    """
-    track = _ramp(n=n, velocity=10.0)
-    track.xyz[lost] = np.nan
-    return track
-
-
-def test_smoothed_offset_fades_out_when_samples_go_stale():
-    track = _mid_dropout()
-    config = StreamConfig(horizon=0.05, camera_latency=0.0)
-    predictor = SmoothedOffset(
-        ConstantVelocityKalman(), horizon=0.05, gate_seconds=0.05
-    )
-    out = simulate(track, predictor, config)
-
-    during = (out.t > track.t[160]) & (out.t < track.t[255])
-    assert np.count_nonzero(during) > 20
-    assert np.all(np.isfinite(out.xyz[during]))
-    # It stops short of the truth rather than extrapolating ever further.
-    drift = out.xyz[during, 0] - track.t[149] * 10.0
-    assert np.max(drift) < 10.0 * (track.t[255] - track.t[149])
-
-
-def test_the_gate_is_what_stops_the_runaway():
-    track = _mid_dropout()
-    config = StreamConfig(horizon=0.05, camera_latency=0.0)
-
-    def excursion(gate):
-        out = simulate(
-            track,
-            SmoothedOffset(
-                ConstantVelocityKalman(), horizon=0.05, gate_seconds=gate
-            ),
-            config,
-        )
-        during = (out.t > track.t[160]) & (out.t < track.t[255])
-        return float(np.max(out.xyz[during, 0]))
-
-    assert excursion(None) > excursion(0.05)
-
-
-def test_the_gate_does_not_bite_during_normal_operation():
-    """The lead always contains the camera latency; that is not staleness.
-
-    Measuring staleness against the horizon rather than the nominal lead
-    made the gate shrink every prediction by a few percent forever.
-    """
-    track = _ramp(n=400, velocity=10.0)
-    config = StreamConfig(horizon=0.05, camera_latency=0.025, output_hz=RATE)
-
-    gated = simulate(
-        track,
-        SmoothedOffset(ConstantVelocityKalman(), horizon=0.05, gate_seconds=0.1),
-        config,
-    )
-    truth = gated.t * 10.0
-    assert np.max(np.abs(gated.xyz[60:, 0] - truth[60:])) < 1e-6
-
-
-def test_schedule_opens_up_with_speed():
-    predictor = SpeedScheduledKalman(
-        sigma_slow=2.0, sigma_fast=40.0, speed_lo=20.0, speed_hi=100.0
-    )
-    assert predictor._schedule(0.0) == pytest.approx(2.0)
-    assert predictor._schedule(10.0) == pytest.approx(2.0)
-    assert predictor._schedule(200.0) == pytest.approx(40.0)
-    assert 2.0 < predictor._schedule(60.0) < 40.0
-
-    # Smoothstep, so the ramp leaves both ends without a kink.
-    lower = predictor._schedule(21.0) - predictor._schedule(20.0)
-    middle = predictor._schedule(61.0) - predictor._schedule(60.0)
-    assert lower < middle
-
-
-def test_schedule_stays_inside_its_bounds_on_real_motion():
-    track = _noisy_wobble(n=500)
-    predictor = SpeedScheduledKalman(sigma_slow=2.0, sigma_fast=40.0)
-    simulate(track, predictor, StreamConfig(horizon=0.05, camera_latency=0.025))
-
-    history = np.asarray(predictor.sigma_history)
-    assert history.size > 100
-    assert np.all(history >= 2.0 - 1e-9)
-    assert np.all(history <= 40.0 + 1e-9)
-
-
-def test_schedule_wobble_is_bounded_and_reported():
-    track = _noisy_wobble(n=400)
-    predictor = SpeedScheduledKalman(sigma_slow=2.0, sigma_fast=40.0)
-    wobble = schedule_wobble([track], predictor)
-    assert 0.0 <= wobble < 1.0
 
 
 def test_cost_is_driven_by_the_worst_recording():
@@ -515,24 +358,3 @@ def test_tuning_improves_on_a_bad_starting_point():
     assert result.evaluated > 1
 
 
-def test_naive_prediction_buys_accuracy_with_jitter():
-    """The trap the smoothness metrics exist to expose.
-
-    Naive extrapolation looks better on deviation alone while making the
-    output stream far jerkier than the motion it is tracking.
-    """
-    rng = np.random.default_rng(11)
-    track = _wobble(n=900)
-    track.xyz = track.xyz + rng.normal(scale=0.1, size=track.xyz.shape)
-
-    config = StreamConfig(horizon=0.05, camera_latency=0.025)
-    reference = oracle(track, config)
-    hold = simulate(track, ZeroOrderHold(), config)
-    naive = simulate(track, NaiveDifference(), config)
-
-    from point_tracking_filter.core.analysis import deviation_stats
-
-    assert deviation_stats(naive, reference).rmse < deviation_stats(hold, reference).rmse
-    assert smoothness_stats(naive, reference).jerk_ratio > 5.0 * smoothness_stats(
-        hold, reference
-    ).jerk_ratio
