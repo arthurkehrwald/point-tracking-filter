@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
     QTableWidget,
@@ -23,9 +25,11 @@ from PySide6.QtWidgets import (
 from ..core.align import CameraExtrinsic, save_extrinsic
 from ..core.analysis import (
     TRANSFORM_MODELS,
+    AnalysisError,
     ConsistencyReport,
-    DeviationStats,
     consistency_report,
+    deviation_stats,
+    smoothness_stats,
     transformed_track,
 )
 from ..core.model import Track
@@ -33,25 +37,37 @@ from ..core.model import Track
 AXIS_LABELS = ("X", "Y", "Z")
 
 
-class StatsTable(QTableWidget):
-    """Three column table comparing before/after :class:`DeviationStats`."""
+class ComparisonTable(QTableWidget):
+    """Table comparing any number of tracks against a shared ground truth."""
 
     def __init__(self) -> None:
-        super().__init__(0, 3)
-        self.setHorizontalHeaderLabels(["Metric", "Before", "After transform"])
+        super().__init__(0, 1)
+        self.setHorizontalHeaderLabels(["Metric"])
         self.verticalHeader().setVisible(False)
         self.horizontalHeader().setStretchLastSection(True)
 
-    def show_stats(
-        self, before: DeviationStats | None, after: DeviationStats | None
-    ) -> None:
-        before_rows = before.as_rows() if before is not None else []
-        after_values = dict(after.as_rows()) if after is not None else {}
-        self.setRowCount(len(before_rows))
-        for row, (label, value) in enumerate(before_rows):
+    def show_comparison(self, ground_truth: Track, tracks: list[Track]) -> None:
+        columns: list[dict[str, str]] = []
+        for track in tracks:
+            rows = deviation_stats(track, ground_truth).as_rows()
+            try:
+                rows += [
+                    (label, value)
+                    for label, value in smoothness_stats(track, ground_truth).as_rows()
+                    if label != "Samples"
+                ]
+            except AnalysisError:
+                pass
+            columns.append(dict(rows))
+
+        labels = list(columns[0]) if columns else []
+        self.setColumnCount(1 + len(tracks))
+        self.setHorizontalHeaderLabels(["Metric"] + [track.name for track in tracks])
+        self.setRowCount(len(labels))
+        for row, label in enumerate(labels):
             self.setItem(row, 0, QTableWidgetItem(label))
-            self.setItem(row, 1, QTableWidgetItem(value))
-            self.setItem(row, 2, QTableWidgetItem(after_values.get(label, "")))
+            for col, values in enumerate(columns, start=1):
+                self.setItem(row, col, QTableWidgetItem(values.get(label, "")))
         self.resizeColumnsToContents()
 
 
@@ -155,7 +171,7 @@ class ExtrinsicEditor(QGroupBox):
 
 
 class AnalysisPanel(QWidget):
-    """Pair selection, sync nudge, transform model and the statistics tables."""
+    """Transform fitting between a pair, and deviation comparison of any tracks."""
 
     extrinsic_changed = Signal(CameraExtrinsic)
     track_produced = Signal(object)
@@ -167,8 +183,21 @@ class AnalysisPanel(QWidget):
         self.report: ConsistencyReport | None = None
         self._analyzed_track: Track | None = None
 
-        self.analyzed_box = QComboBox()
         self.truth_box = QComboBox()
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Ground truth"))
+        layout.addWidget(self.truth_box)
+        layout.addWidget(self._build_fit_group())
+        layout.addWidget(self._build_compare_group(), 1)
+
+        self.extrinsic_editor = ExtrinsicEditor(store.extrinsic)
+        self.extrinsic_editor.changed.connect(self.extrinsic_changed)
+        layout.addWidget(self.extrinsic_editor)
+
+    def _build_fit_group(self) -> QGroupBox:
+        group = QGroupBox("Fit a transform")
+        self.analyzed_box = QComboBox()
 
         self.offset_spin = QDoubleSpinBox()
         self.offset_spin.setRange(-60.0, 60.0)
@@ -187,32 +216,39 @@ class AnalysisPanel(QWidget):
         self.apply_transform_button.setEnabled(False)
         self.apply_transform_button.clicked.connect(self.apply_transform)
 
-        form = QFormLayout()
+        form = QFormLayout(group)
         form.addRow("Analyzed", self.analyzed_box)
-        form.addRow("Ground truth", self.truth_box)
         form.addRow("Sync offset", self.offset_spin)
         form.addRow("Transform model", self.model_box)
         form.addRow(analyze_button)
         form.addRow(self.apply_transform_button)
 
-        self.stats_table = StatsTable()
         self.summary = QLabel("No analysis yet.")
         self.summary.setWordWrap(True)
+        form.addRow(self.summary)
 
         self.transform_view = QPlainTextEdit()
         self.transform_view.setReadOnly(True)
         self.transform_view.setMaximumHeight(90)
+        form.addRow(QLabel("Fitted transform"))
+        form.addRow(self.transform_view)
+        return group
 
-        self.extrinsic_editor = ExtrinsicEditor(store.extrinsic)
-        self.extrinsic_editor.changed.connect(self.extrinsic_changed)
+    def _build_compare_group(self) -> QGroupBox:
+        group = QGroupBox("Compare tracks to the ground truth")
+        self.compare_list = QListWidget()
+        self.compare_list.setMaximumHeight(120)
 
-        layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(self.stats_table, 1)
-        layout.addWidget(self.summary)
-        layout.addWidget(QLabel("Fitted transform"))
-        layout.addWidget(self.transform_view)
-        layout.addWidget(self.extrinsic_editor)
+        compare_button = QPushButton("Compare")
+        compare_button.clicked.connect(self.compare_tracks)
+
+        self.comparison_table = ComparisonTable()
+
+        layout = QVBoxLayout(group)
+        layout.addWidget(self.compare_list)
+        layout.addWidget(compare_button)
+        layout.addWidget(self.comparison_table, 1)
+        return group
 
     def refresh(self, tracks: dict[str, Track] | None = None) -> None:
         """Update the selectable tracks, keeping the current choices."""
@@ -229,7 +265,24 @@ class AnalysisPanel(QWidget):
                 index = self._first_of_source(preferred)
             box.setCurrentIndex(max(index, 0))
             box.blockSignals(False)
+        self._refresh_compare_list()
         self.extrinsic_editor.set_extrinsic(self.store.extrinsic)
+
+    def _refresh_compare_list(self) -> None:
+        checked = {
+            self.compare_list.item(row).data(Qt.ItemDataRole.UserRole)
+            for row in range(self.compare_list.count())
+            if self.compare_list.item(row).checkState() == Qt.CheckState.Checked
+        }
+        self.compare_list.clear()
+        for name, track in self.tracks.items():
+            item = QListWidgetItem(f"{name} [{track.source}]")
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(
+                Qt.CheckState.Checked if name in checked else Qt.CheckState.Unchecked
+            )
+            item.setData(Qt.ItemDataRole.UserRole, name)
+            self.compare_list.addItem(item)
 
     def _first_of_source(self, source: str) -> int:
         for index, (_, track) in enumerate(self.tracks.items()):
@@ -253,7 +306,6 @@ class AnalysisPanel(QWidget):
         self._analyzed_track = shifted
         self.apply_transform_button.setEnabled(True)
 
-        self.stats_table.show_stats(report.before, report.after)
         self.transform_view.setPlainText(
             "\n".join(
                 "  ".join(f"{value:9.4f}" for value in row)
@@ -279,3 +331,16 @@ class AnalysisPanel(QWidget):
             self._analyzed_track, self.report.transform, suffix=f"{self.report.model} fit"
         )
         self.track_produced.emit(corrected)
+
+    def compare_tracks(self) -> None:
+        """Compare every checked track against the chosen ground truth."""
+        truth = self.tracks.get(self.truth_box.currentData())
+        if truth is None:
+            return
+        names = [
+            self.compare_list.item(row).data(Qt.ItemDataRole.UserRole)
+            for row in range(self.compare_list.count())
+            if self.compare_list.item(row).checkState() == Qt.CheckState.Checked
+        ]
+        tracks = [self.tracks[name] for name in names if name in self.tracks]
+        self.comparison_table.show_comparison(truth, tracks)

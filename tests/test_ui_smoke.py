@@ -85,8 +85,14 @@ def test_full_workflow(window):
     for model_index in range(panel.model_box.count()):
         panel.model_box.setCurrentIndex(model_index)
         panel.analyze()
-        assert panel.stats_table.rowCount() > 0
         assert "comparable samples" in panel.summary.text()
+
+    # Comparing arbitrary tracks against the ground truth.
+    for row in range(panel.compare_list.count()):
+        panel.compare_list.item(row).setCheckState(Qt.CheckState.Checked)
+    panel.compare_tracks()
+    assert panel.comparison_table.rowCount() > 0
+    assert panel.comparison_table.columnCount() == panel.compare_list.count() + 1
 
     # Filtering, fed back into the player.
     filter_panel = window.filter_panel
@@ -197,14 +203,20 @@ def test_prediction_panel_shows_variants_side_by_side(window):
     assert len(predicted) == 2
     assert any("Constant-velocity" in name for name in predicted)
 
-    assert panel.table.rowCount() == 2
-    labels = [panel.table.item(row, 0).text() for row in range(2)]
-    assert "Zero-order hold" in labels
-    # Accuracy and smoothness are reported together, since either alone can
-    # pick a predictor that is unusable on the other axis.
-    for row in range(2):
-        for column in range(1, panel.table.columnCount()):
-            assert panel.table.item(row, column).text() not in ("", "nan")
+    # The offline bound used as the default reference is added too, so the
+    # Analysis panel's track comparison can score the variants against it.
+    assert any("(oracle)" in name for name in names)
+
+    # The Analysis panel can now compare these variants and the reference
+    # against any ground truth, superseding this panel's own comparison.
+    window.refresh_panels()
+    analysis = window.analysis_panel
+    analysis.truth_box.setCurrentIndex(analysis.truth_box.findData(oak.led.name))
+    for row in range(analysis.compare_list.count()):
+        analysis.compare_list.item(row).setCheckState(Qt.CheckState.Checked)
+    analysis.compare_tracks()
+    assert analysis.comparison_table.rowCount() > 0
+    assert analysis.comparison_table.columnCount() == analysis.compare_list.count() + 1
 
 
 def test_prediction_panel_estimates_and_tunes(window):

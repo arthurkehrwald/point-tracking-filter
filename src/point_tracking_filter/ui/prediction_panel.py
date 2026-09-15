@@ -1,10 +1,9 @@
-"""Panel for predictive filtering: run variants side by side and compare them.
+"""Panel for predictive filtering: run variants side by side.
 
 The point of showing several variants at once is that no single number
-decides between them. A predictor that scores well on deviation can still
-be unusable because its output twitches, so the table reports accuracy and
-smoothness together and the player shows the trajectories on top of each
-other.
+decides between them. The player shows the trajectories on top of each
+other, and the Analysis panel's track comparison can score any of them
+(together with the reference this panel used) against a ground truth.
 """
 
 from __future__ import annotations
@@ -16,16 +15,13 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
-    QHeaderView,
     QLabel,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from ..core.analysis import AnalysisError, deviation_stats, smoothness_stats
+from ..core.analysis import AnalysisError
 from ..core.model import Track
 from ..core.prediction import (
     ConstantVelocityKalman,
@@ -40,7 +36,6 @@ from ..core.prediction import (
 )
 
 ORACLE_LABEL = "Offline bound (non-causal)"
-METRIC_COLUMNS = ("Variant", "RMSE [cm]", "95th [cm]", "Jerk", "Step")
 
 
 class PredictionPanel(QWidget):
@@ -88,17 +83,6 @@ class PredictionPanel(QWidget):
         self.spline_smoothing_spin.setSingleStep(0.01)
         self.spline_smoothing_spin.setToolTip("Smoothing penalty passed to the GCV spline backend.")
 
-        self.table = QTableWidget(0, len(METRIC_COLUMNS))
-        self.table.setHorizontalHeaderLabels(METRIC_COLUMNS)
-        self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.table.setMinimumHeight(120)
-
-        compare_button = QPushButton("Compare variants")
-        compare_button.clicked.connect(self.compare_variants)
-
         show_button = QPushButton("Show in player")
         show_button.clicked.connect(self.show_in_player)
 
@@ -126,11 +110,9 @@ class PredictionPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.addLayout(form)
         layout.addWidget(variants)
-        layout.addWidget(compare_button)
         layout.addWidget(show_button)
         layout.addWidget(tune_button)
         layout.addWidget(estimate_button)
-        layout.addWidget(self.table)
         layout.addWidget(self.status)
         layout.addStretch(1)
 
@@ -230,44 +212,21 @@ class PredictionPanel(QWidget):
             self.status.setText(str(error))
             return None
 
-    def compare_variants(self) -> None:
-        result = self._run()
-        if result is None:
-            return
-        predicted, reference = result
-
-        self.table.setRowCount(len(predicted))
-        for row, track in enumerate(predicted):
-            accuracy = deviation_stats(track, reference)
-            try:
-                smoothness = smoothness_stats(track, reference)
-                jerk, step = smoothness.jerk_ratio, smoothness.step_ratio
-            except AnalysisError:
-                jerk = step = float("nan")
-            cells = (
-                track.meta.get("predictor", track.name),
-                f"{accuracy.rmse:.3f}",
-                f"{accuracy.p95:.3f}",
-                f"{jerk:.1f}",
-                f"{step:.2f}",
-            )
-            for column, text in enumerate(cells):
-                self.table.setItem(row, column, QTableWidgetItem(text))
-
-        self.status.setText(
-            "Jerk and step are relative to the reference: 1.0 moves exactly as "
-            "much as the real motion, above that is added noise. Lower RMSE with "
-            "a higher jerk means accuracy bought with jitter."
-        )
-
     def show_in_player(self) -> None:
         result = self._run()
         if result is None:
             return
-        predicted, _ = result
+        predicted, reference = result
         for track in predicted:
             self.track_produced.emit(track)
-        self.compare_variants()
+        if self.truth_box.currentData() is None:
+            # The offline bound isn't a stored recording; add it too, so the
+            # Analysis panel's track comparison can score against it.
+            self.track_produced.emit(reference)
+        self.status.setText(
+            "Shown in the player. Use the Analysis panel's track comparison "
+            "to score these, and the reference, against a ground truth."
+        )
 
     def tune_selected(self) -> None:
         """Fit the process noise of the fixed Kalman variant."""
@@ -296,7 +255,6 @@ class PredictionPanel(QWidget):
             self.status.setText(str(error))
             return
 
-        self.compare_variants()
         self.status.setText(
             f"Tuned {label} on {track.name} alone, so treat it as a starting "
             f"point rather than a setting that will hold across recordings."
