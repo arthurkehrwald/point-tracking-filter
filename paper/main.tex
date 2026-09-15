@@ -124,6 +124,7 @@ the optimal matrix is
 In the usual formulation, $d = \operatorname{sgn} \det(\mathbf{V} \mathbf{U}^\top)$ ensures $\det \mathbf{R} = +1$, so that $\mathbf{R}$ is a proper rotation \cite{kabsch1978}.
 Here, however, the coordinate system of the stereo camera described above is left-handed, while that of the \emph{OptiTrack} system is right-handed.
 No proper rotation can map one onto the other, so $d = -\operatorname{sgn} \det(\mathbf{V} \mathbf{U}^\top)$ is chosen instead, which yields $\det \mathbf{R} = -1$, i.e., $\mathbf{R}$ contains a reflection in addition to a rotation.
+Without this adjustment, the tracked positions of the two systems are mirrored across the XY-plane.
 
 \section{Evaluation}
 \label{sec:evaluation}
