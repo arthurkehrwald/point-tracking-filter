@@ -309,9 +309,7 @@ def estimate_noise(track: Track) -> tuple[float, float]:
     """
     from .filtering import SplineParams, apply_spline_filter
 
-    smoothed = apply_spline_filter(
-        track, SplineParams(method="gcv", auto_smoothing=True)
-    )
+    smoothed = apply_spline_filter(track, SplineParams(auto_smoothing=True))
     residual = (track.xyz - smoothed.xyz)[track.valid_mask]
     if residual.size == 0:
         raise PredictionError(f"{track.name}: nothing to estimate noise from")
@@ -668,7 +666,7 @@ def oracle(track: Track, config: StreamConfig | None = None, **filter_kwargs) ->
 
     config = config or StreamConfig()
     params = SplineParams(**filter_kwargs) if filter_kwargs else SplineParams(
-        method="gcv", auto_smoothing=True
+        auto_smoothing=True
     )
     smoothed = apply_spline_filter(track, params)
     targets = output_times(track, config) + config.horizon

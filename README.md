@@ -56,19 +56,12 @@ other is analyzed in terms of:
 
 ## Filtering
 
-A filter may be applied to the recordings to smooth out noise and triangulation errors. It works by fitting a smoothing
-spline to the recording data. Three smoothing techniques are available, selectable in the filter panel:
+A filter may be applied to the recordings to smooth out noise and triangulation errors. It works by fitting a GCV
+smoothing spline to the recording data: x, y and z are fit jointly as a single cubic spline, penalizing the integral
+of the squared second derivative (`make_smoothing_spline`). Its smoothing parameter can either be set manually or,
+with "Automatic (GCV)" checked, chosen automatically via generalized cross-validation.
 
-- **FITPACK (per-axis)** fits x, y and z independently, penalizing jumps in the derivative at each knot
-  (`UnivariateSpline`, the same as SciPy's `splrep`). This is the default and the original implementation.
-- **GCV smoothing spline** fits x, y and z jointly as a single cubic spline, penalizing the integral of the squared
-  second derivative (`make_smoothing_spline`). Its smoothing parameter can either be set manually or, with "Automatic
-  (GCV)" checked, chosen automatically via generalized cross-validation.
-- **Parametric curve (joint xyz)** also fits x, y and z jointly, sharing one knot vector across axes and penalizing
-  derivative jumps like the FITPACK method, but as a single parametric curve over time rather than three independent
-  functions (`make_splprep`).
-
-Each spline may be parameterized manually through the user interface or by minimizing mean deviation from a given
+The spline may be parameterized manually through the user interface or by minimizing mean deviation from a given
 ground truth recording. The result may be displayed along with the original data in the player.
 
 ## Predictive filtering

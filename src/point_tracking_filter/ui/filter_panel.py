@@ -10,19 +10,12 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QLabel,
     QPushButton,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from ..core.analysis import deviation_stats
-from ..core.filtering import (
-    METHOD_LABELS,
-    FilterError,
-    SplineParams,
-    apply_spline_filter,
-    optimize_spline,
-)
+from ..core.filtering import FilterError, SplineParams, apply_spline_filter, optimize_spline
 from ..core.model import Track
 
 
@@ -39,23 +32,13 @@ class FilterPanel(QWidget):
         self.source_box = QComboBox()
         self.truth_box = QComboBox()
 
-        self.method_box = QComboBox()
-        for method, label in METHOD_LABELS.items():
-            self.method_box.addItem(label, method)
-        self.method_box.currentIndexChanged.connect(self._on_method_changed)
-
         self.smoothing_spin = QDoubleSpinBox()
         self.smoothing_spin.setDecimals(6)
         self.smoothing_spin.setRange(0.0, 1000.0)
         self.smoothing_spin.setSingleStep(0.05)
         self.smoothing_spin.setValue(SplineParams().smoothing)
 
-        self.degree_spin = QSpinBox()
-        self.degree_spin.setRange(1, 5)
-        self.degree_spin.setValue(3)
-
         self.auto_smoothing_box = QCheckBox("Automatic (GCV)")
-        self.auto_smoothing_box.setEnabled(False)
         self.auto_smoothing_box.toggled.connect(self.smoothing_spin.setDisabled)
 
         self.confidence_box = QCheckBox("Weight by confidence")
@@ -79,7 +62,7 @@ class FilterPanel(QWidget):
         self.status = QLabel("No filter applied yet.")
         self.status.setWordWrap(True)
 
-        for widget in (self.smoothing_spin, self.degree_spin, self.resample_hz):
+        for widget in (self.smoothing_spin, self.resample_hz):
             widget.valueChanged.connect(self._on_parameter_changed)
         for widget in (self.confidence_box, self.resample_box, self.auto_smoothing_box):
             widget.toggled.connect(self._on_parameter_changed)
@@ -87,10 +70,8 @@ class FilterPanel(QWidget):
         form = QFormLayout()
         form.addRow("Source", self.source_box)
         form.addRow("Ground truth", self.truth_box)
-        form.addRow("Method", self.method_box)
         form.addRow("Smoothing", self.smoothing_spin)
         form.addRow(self.auto_smoothing_box)
-        form.addRow("Degree", self.degree_spin)
         form.addRow(self.confidence_box)
         form.addRow(self.resample_box, self.resample_hz)
         form.addRow(self.live_box)
@@ -125,20 +106,11 @@ class FilterPanel(QWidget):
 
     def params(self) -> SplineParams:
         return SplineParams(
-            method=self.method_box.currentData(),
             smoothing=self.smoothing_spin.value(),
-            degree=self.degree_spin.value(),
             use_confidence_weights=self.confidence_box.isChecked(),
             resample_hz=self.resample_hz.value() if self.resample_box.isChecked() else None,
             auto_smoothing=self.auto_smoothing_box.isChecked(),
         )
-
-    def _on_method_changed(self, *_) -> None:
-        is_gcv = self.method_box.currentData() == "gcv"
-        self.degree_spin.setEnabled(not is_gcv)
-        self.auto_smoothing_box.setEnabled(is_gcv)
-        self.smoothing_spin.setDisabled(is_gcv and self.auto_smoothing_box.isChecked())
-        self._on_parameter_changed()
 
     def _source_track(self) -> Track | None:
         return self.tracks.get(self.source_box.currentData())

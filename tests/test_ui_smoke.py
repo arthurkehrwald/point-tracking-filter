@@ -129,7 +129,7 @@ def test_extrinsic_round_trip_through_the_panel(window, tmp_path, monkeypatch):
     np.testing.assert_allclose(shift, [5.0, 0.0, 0.0], atol=1e-9)
 
 
-def test_filter_panel_method_switch(window):
+def test_filter_panel_gcv_auto_smoothing(window):
     oak = window.store.load(next(OAK_D_DIR.glob("slow2*.csv")))
     opti = window.store.load(next(OPTITRACK_DIR.glob("slow2*.csv")))
     window.player.add_track(oak.led)
@@ -141,16 +141,9 @@ def test_filter_panel_method_switch(window):
     panel.source_box.setCurrentIndex(panel.source_box.findData(oak.led.name))
     panel.truth_box.setCurrentIndex(panel.truth_box.findData(opti.led.name))
 
-    for index in range(panel.method_box.count()):
-        panel.method_box.setCurrentIndex(index)
-        method = panel.method_box.currentData()
-        assert panel.degree_spin.isEnabled() == (method != "gcv")
-        assert panel.auto_smoothing_box.isEnabled() == (method == "gcv")
-        filtered = panel.apply_filter()
-        assert filtered is not None
-        assert filtered.meta["spline_params"].method == method
+    filtered = panel.apply_filter()
+    assert filtered is not None
 
-    panel.method_box.setCurrentIndex(panel.method_box.findData("gcv"))
     panel.auto_smoothing_box.setChecked(True)
     assert not panel.smoothing_spin.isEnabled()
     filtered = panel.apply_filter()
