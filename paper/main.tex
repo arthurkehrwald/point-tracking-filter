@@ -3,7 +3,7 @@
 \usepackage{graphicx}
 \usepackage{microtype}
 
-\newcommand{\TheTitle}{Smoothing and Extrapolation of Motion Capture Measurements by Cubic Spline Interpolation}
+\newcommand{\TheTitle}{Smoothing and Extrapolation of Motion Capture Measurements using Cubic Splines}
 \newcommand{\TheAuthors}{Arthur Kehrwald}
 
 \headers{Smoothing and Extrapolation of Motion Capture Measurements}{\TheAuthors}
@@ -32,7 +32,7 @@ During head movements, the channel separation broke down completely.
 \label{sec:objective}
 
 The goal is to simplify and revise the existing tracking system and to evaluate the end result as objectively as possible, independently of our stereo display, using the \emph{OptiTrack} motion capture system of TH Köln.
-The focus is on smoothing and extrapolating the triangulated points by cubic spline interpolation.
+The focus is on smoothing and extrapolating the triangulated points by fitting a cubic spline to recording samples.
 This is intended to smooth out the depth errors typical of stereo tracking systems and to compute a future position instead of the position at the time of the last capture, so that a display, if connected, can show an approximately correct perspective even during movements.
 
 \section{Revision of the Tracking Software}
