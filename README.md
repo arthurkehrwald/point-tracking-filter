@@ -21,19 +21,33 @@ uv run point-tracking-filter
 
 From the repository root:
 
+On Linux and macOS:
 ```
 conda env create -f environment.yml
 conda activate point-tracking-filter
 point-tracking-filter
 ```
 
+On Windows, use `environment-windows.yml` instead:
+```
+conda env create -f environment-windows.yml
+conda activate point-tracking-filter
+point-tracking-filter
+```
+
 `environment.yml` installs the scientific stack from conda-forge and the Qt stack (PySide6, pyqtgraph, PyOpenGL) from
-PyPI via pip. Qt from conda-forge brings its own `libdrm`, which breaks OpenGL on systems with a newer Mesa driver
-("Could not initialize GLX"), so do not replace those pip packages with their conda equivalents.
+PyPI via pip. Qt from conda-forge brings its own `libdrm`, which breaks OpenGL on Linux/macOS systems with a newer Mesa
+driver ("Could not initialize GLX"), so do not replace those pip packages with their conda equivalents there.
+
+`environment-windows.yml` instead installs the Qt stack from conda-forge. On Windows, a pip-installed PySide6 wheel
+bundles its own Qt/ICU/OpenSSL/VC-runtime DLLs that conflict with conda-forge's `icu`/`openssl`/`vc` packages already
+present in the env (conda puts `Library\bin` ahead on `PATH`), causing `ImportError: DLL load failed while importing
+QtCore: The specified procedure could not be found.`. Installing PySide6 from conda-forge instead keeps every native
+DLL from the same build.
 
 The package is installed in editable mode because the application finds `config/` and `recordings/` relative to its
 source checkout, so keep the environment pointing at this clone. After the dependencies change, update the environment
-with `conda env update -f environment.yml --prune`.
+with `conda env update -f environment.yml --prune` (or `environment-windows.yml` on Windows).
 
 The tests and the evaluation script, which regenerates the figures in `paper/assets`, run inside the activated
 environment:

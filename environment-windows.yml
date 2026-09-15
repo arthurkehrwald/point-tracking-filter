@@ -1,0 +1,23 @@
+name: point-tracking-filter
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.12
+  - numpy>=2.0
+  - pandas>=2.2
+  - scipy>=1.14
+  - scipy-stubs
+  # dev
+  - matplotlib-base>=3.10
+  - pytest>=8.0
+  # Windows only: unlike environment.yml, the Qt stack comes from conda-forge rather than PyPI. Pip's PySide6 wheel
+  # bundles its own Qt6/ICU/OpenSSL/VC-runtime DLLs, which conflict with conda-forge's icu/openssl/vc packages already
+  # in this env (conda puts Library\bin ahead on PATH), causing "ImportError: DLL load failed while importing QtCore:
+  # The specified procedure could not be found." Installing PySide6 from conda-forge keeps every native DLL from the
+  # same build.
+  - pyside6>=6.7
+  - pyqtgraph>=0.13
+  - pyopengl>=3.1
+  - pip
+  - pip:
+      - -e .
