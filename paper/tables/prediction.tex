@@ -1,0 +1,25 @@
+\begin{tabular}{lllcccc}
+\hline
+Regime & $h$ [ms] & Predictor & RMSE & P95 & Jerk ratio & Step ratio \\
+\hline
+slow & 0 & Hold & 0.84 & 1.62 & 9.0 & 1.53 \\
+ &  & Kalman & 0.65 & 1.25 & 3.1 & 1.10 \\
+ &  & Spline refit & 0.65 & 1.24 & 3.3 & 1.11 \\
+ & 50 & Hold & 1.61 & 3.48 & 9.1 & 1.52 \\
+ &  & Kalman & 0.80 & 1.51 & 5.0 & 1.25 \\
+ &  & Spline refit & 0.81 & 1.52 & 3.9 & 1.23 \\
+ & 100 & Hold & 2.47 & 5.54 & 8.9 & 1.53 \\
+ &  & Kalman & 1.07 & 2.09 & 6.6 & 1.49 \\
+ &  & Spline refit & 1.15 & 2.24 & 9.6 & 1.74 \\
+\hline
+fast & 0 & Hold & 4.24 & 6.84 & 40.5 & 2.18 \\
+ &  & Kalman & 3.77 & 6.34 & 21.4 & 1.57 \\
+ &  & Spline refit & 3.45 & 5.75 & 22.3 & 1.56 \\
+ & 50 & Hold & 9.98 & 16.21 & 41.1 & 2.18 \\
+ &  & Kalman & 8.51 & 14.91 & 33.1 & 2.23 \\
+ &  & Spline refit & 8.46 & 14.85 & 33.2 & 2.36 \\
+ & 100 & Hold & 15.50 & 25.11 & 41.8 & 2.19 \\
+ &  & Kalman & 14.77 & 25.57 & 45.0 & 3.00 \\
+ &  & Spline refit & 16.09 & 27.92 & 61.7 & 3.76 \\
+\hline
+\end{tabular}

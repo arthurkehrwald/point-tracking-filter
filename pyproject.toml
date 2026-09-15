@@ -17,6 +17,7 @@ point-tracking-filter = "point_tracking_filter.__main__:main"
 
 [dependency-groups]
 dev = [
+    "matplotlib>=3.11.2",
     "pytest>=8.0",
 ]
 
