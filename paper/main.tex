@@ -241,29 +241,23 @@ A ratio of 1 means that the output moves exactly as much as the real motion; val
 On six of the seven recordings, the RMSE decreases by at most 6\%, from 0.85 to 0.81~cm in the best case.
 The component removed by the spline has an RMS of only $\hat\sigma = 0.07$--$0.24$~cm, while the deviations are 0.46--0.85~cm.
 
-The reason becomes apparent when the deviation is split into a component $\mathbf{e}_{\text{low}}$ below and a component $\mathbf{e}_{\text{high}}$ above the cutoff frequency $f_c$ of \cref{eq:transfer}.
-The spline removes $\mathbf{e}_{\text{high}}$ and preserves $\mathbf{e}_{\text{low}}$, and since the two components are orthogonal, the RMSE after smoothing is approximately $(\mathrm{RMSE}^2 - \hat\sigma^2)^{1/2}$.
-For \emph{slow5}, this yields $(0.852^2 - 0.244^2)^{1/2} = 0.816$~cm compared with the measured 0.810~cm.
-On these six recordings, the cutoff frequencies resulting from the GCV-chosen $\lambda$ lie between 4 and 11~Hz, and a spectral analysis of the raw deviations shows that 81--99\% of their power lies below the cutoff of the respective axis.
-The deviation of the \emph{OAK-D} is thus not predominantly white noise, but a slowly varying error that no low-pass filter can separate from the motion.
-A residual time offset between the two systems, which would produce an error proportional to the velocity, can be ruled out:
-shifting the \emph{OAK-D} tracks by up to $\pm 80$~ms reduces the RMSE by at most 0.01~cm.
-The error is therefore spatial, as the left plot of \cref{fig:filtering-excerpt} illustrates, where the depth error rises by about 1~cm while the LED passes through part of the volume and then settles at a different level.
-This is consistent with the geometry of stereo triangulation: with focal length $f$ and baseline $B$, the depth $z = fB/d$ follows from the disparity $d$, so a small disparity error $\delta d$ caused by imperfect calibration or rectification produces a depth error
+A concern specific to stereo tracking is depth errors.
+With focal length $f$ and baseline $B$, the depth $z = fB/d$ follows from the disparity $d$, so a small disparity error $\delta d$ caused by imperfect calibration or rectification produces a depth error
 \[
   \delta z \approx \frac{z^2}{fB} \, \delta d
 \]
-that changes smoothly with the position of the LED.
-Accordingly, in most recordings the depth axis has the largest standard deviation, and GCV chooses a smaller cutoff for it than for the lateral axes.
-Such an error is indistinguishable from motion for any filter that sees only the \emph{OAK-D} data.
 
-\emph{fast4} is the exception.
-Isolated outliers of up to 6~cm (right plot of \cref{fig:filtering-excerpt}), presumably incorrect detections, dominate its RMSE, which the spline reduces from 1.86 to 0.67~cm.
-At the same time, however, P95 and P99 increase from 0.84 to 0.96~cm and from 1.46 to 2.65~cm.
-The spline does not remove an outlier but distributes it over the width of its kernel:
-the squared error of a single large deviation is replaced by many small ones, which lowers the RMSE but pushes more samples above the percentiles.
-Moreover, the outliers inflate the apparent noise level, so GCV selects cutoff frequencies of only 3--5~Hz for this recording and smooths the actual motion more strongly than necessary.
-A robust rejection of outliers before smoothing would be the better remedy here.
+Accordingly, in most recordings the depth axis has the largest standard deviation, and GCV chooses a smaller cutoff for it than for the lateral axes.
+This smoothes out most spikes along the z axis, but extreme outliers, such as the ones in the recording \emph{fast4} shown in \cref{fig:depth-error}, still pull the spline away from the ground truth.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.6\linewidth]{assets/depth-error.png}
+  \caption{Depth error affects fitted spline (pink). Ground truth (orange), Raw data (green).}
+  \label{fig:depth-error}
+\end{figure}
+
+This could potentially be solved by a rejection of outliers before smoothing.
 
 \subsection{Prediction}
 
@@ -335,7 +329,7 @@ The most accurate setting, $\lambda = 10^{-4}$, still leaves an RMSE of 8.1~cm f
 The offline smoothing with GCV splines works as intended, in that it adapts the smoothing parameter automatically to each recording and axis.
 It is nevertheless of little use for the accuracy of the \emph{OAK-D} tracking, since it reduces the RMSE by at most 6\%.
 The dominant error is a slowly varying, position-dependent triangulation error with an RMSE of 0.46 to 0.85~cm, which lies in the passband of every filter that preserves the motion.
-It has to be reduced by better calibration, not by filtering.
+It has to be reduced by better calibration or more accurate detection, not by filtering.
 Outliers, on the other hand, are only spread out by the spline and should be rejected beforehand.
 
 For slow movements, as they occur in front of a screen, real-time prediction is effective:
