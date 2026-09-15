@@ -83,7 +83,7 @@ A drawback is that possible differences in the latency of the two recordings are
 
 Three tracking markers attached to the stereo camera allow the \emph{OptiTrack} cameras to capture their position and orientation relative to the LED, and thus allow the LED coordinates to be mapped from the coordinate system of one camera system into that of the other by a combination of a translation and a rotation.
 For this, an assignment of the markers must first be made. The mount of the tracking markers is designed such that the markers form a triangle with three clearly different side lengths.
-The rotation matrix $\mathbf{R}$ and the translation vector $\mathbf{t}$ map the positions of the three tracking markers $\mathbf{p_1}, \mathbf{p_2}, \mathbf{p_3}$ determined by the \emph{OptiTrack} system onto the positions of the tracking markers in the coordinate system of the stereo camera $\mathbf{p'_1}, \mathbf{p'_2}, \mathbf{p'_3}$, such that $\mathbf{p'_n} = \mathbf{p_n} \mathbf{R} + \mathbf{t}$ holds for $n \in \mathbf{\{1, 2, 3\}}$.
+The rotation matrix $\mathbf{R}$ and the translation vector $\mathbf{t}$ map the positions of the three tracking markers $\mathbf{p_1}, \mathbf{p_2}, \mathbf{p_3}$ determined by the \emph{OptiTrack} system onto the positions of the tracking markers in the coordinate system of the stereo camera $\mathbf{p'_1}, \mathbf{p'_2}, \mathbf{p'_3}$, such that $\mathbf{p'_n} = \mathbf{R} \mathbf{p_n}+ \mathbf{t}$ holds for $n \in \{1, 2, 3\}$.
 
 \section{Evaluation}
 \label{sec:evaluation}
