@@ -41,7 +41,7 @@ This is intended to smooth out the depth errors typical of stereo tracking syste
 First, the software is reduced to the bare essentials:
 The detection of the eyes by a deep learning model and the tracking by optical flow are replaced by a blob detector.
 It is therefore no longer a markerless eye tracking system; instead, the software detects an infrared LED.
-This not only serves the purpose of simplification, but also makes it possible to capture the same LED synchronously with the \emph{OptiTrack} motion capture system, as described in \cref{sec:sync}.
+This not only serves the purpose of simplification but also makes it possible to capture the same LED synchronously with the \emph{OptiTrack} motion capture system, as described in \cref{sec:sync}.
 The stereo camera \emph{Luxonis OAK-D Pro} is still used, but after manual calibration of the intrinsic and extrinsic camera parameters \cite{luxonis2026}.
 During the master's project, the factory calibration was used.
 The code for retrieving and rectifying the images and for triangulating the 3D coordinates is rewritten but remains equivalent.
@@ -68,18 +68,20 @@ With the recording function, which is also new, the coordinates of the LED toget
 \end{figure}
 
 The signal processing is to be designed and tested on the basis of authentic motion capture data.
-The recording takes place in the motion capture studio at Campus Deutz. For this purpose, the LED is attached to a pair of glasses together with a battery and a switch.
+The recording takes place in the motion capture studio at Campus Deutz.
+For this purpose, the LED is attached to a pair of glasses together with a battery and a switch.
 The test data therefore consists of head movements.
 During the recordings, the LED moves within the area visible to the stereo camera at a distance of approx.\ 30~cm to 3~m.
 To simulate different usage scenarios, there are five recordings of 30 seconds each for two different movement patterns:
 On the one hand, slow movements with longer pauses, as would occur when using a screen, and on the other hand, fast, abrupt movements, as might occur in sports or dance.
+All movements are recorded simultaneously using the \emph{OAK-D} at 75 Hz and using the \emph{OptiTrack} system at 120 Hz and exported to CSV-files.
 
 \section{Temporal and Spatial Synchronization}
 \label{sec:sync}
 
-All movements are recorded simultaneously with the stereo camera and the \emph{OptiTrack} system.
+To process the recordings from the two different systems effectively, they must first be converted into a common data structure with aligned coordinate spaces and timestamps.
 The point in time at which the LED first appears in the two recordings is used for temporal synchronization.
-This works because the LED is only switched on once both systems are already recording and the LED is visible to both systems.
+This works because the LED was manually switched on only once the two systems were already recording and the LED was visible to both.
 A drawback is that possible differences in the latency of the two recordings are thereby compensated for, and this relevant (but not essential) information remains hidden due to the lack of a common clock.
 
 Three tracking markers attached to the stereo camera allow the \emph{OptiTrack} cameras to capture their position and orientation relative to the LED.
