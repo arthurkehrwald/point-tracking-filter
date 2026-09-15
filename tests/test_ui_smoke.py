@@ -85,7 +85,7 @@ def test_full_workflow(window):
     for model_index in range(panel.model_box.count()):
         panel.model_box.setCurrentIndex(model_index)
         panel.analyze()
-        assert panel.before_table.rowCount() > 0
+        assert panel.stats_table.rowCount() > 0
         assert "comparable samples" in panel.summary.text()
 
     # Filtering, fed back into the player.

@@ -34,20 +34,24 @@ AXIS_LABELS = ("X", "Y", "Z")
 
 
 class StatsTable(QTableWidget):
-    """Two column table showing one :class:`DeviationStats`."""
+    """Three column table comparing before/after :class:`DeviationStats`."""
 
-    def __init__(self, title: str) -> None:
-        super().__init__(0, 2)
-        self.setHorizontalHeaderLabels([title, "Value"])
+    def __init__(self) -> None:
+        super().__init__(0, 3)
+        self.setHorizontalHeaderLabels(["Metric", "Before", "After transform"])
         self.verticalHeader().setVisible(False)
         self.horizontalHeader().setStretchLastSection(True)
 
-    def show_stats(self, stats: DeviationStats | None) -> None:
-        rows = stats.as_rows() if stats is not None else []
-        self.setRowCount(len(rows))
-        for row, (label, value) in enumerate(rows):
+    def show_stats(
+        self, before: DeviationStats | None, after: DeviationStats | None
+    ) -> None:
+        before_rows = before.as_rows() if before is not None else []
+        after_values = dict(after.as_rows()) if after is not None else {}
+        self.setRowCount(len(before_rows))
+        for row, (label, value) in enumerate(before_rows):
             self.setItem(row, 0, QTableWidgetItem(label))
             self.setItem(row, 1, QTableWidgetItem(value))
+            self.setItem(row, 2, QTableWidgetItem(after_values.get(label, "")))
         self.resizeColumnsToContents()
 
 
@@ -191,8 +195,7 @@ class AnalysisPanel(QWidget):
         form.addRow(analyze_button)
         form.addRow(self.apply_transform_button)
 
-        self.before_table = StatsTable("Before")
-        self.after_table = StatsTable("After transform")
+        self.stats_table = StatsTable()
         self.summary = QLabel("No analysis yet.")
         self.summary.setWordWrap(True)
 
@@ -200,16 +203,12 @@ class AnalysisPanel(QWidget):
         self.transform_view.setReadOnly(True)
         self.transform_view.setMaximumHeight(90)
 
-        tables = QHBoxLayout()
-        tables.addWidget(self.before_table)
-        tables.addWidget(self.after_table)
-
         self.extrinsic_editor = ExtrinsicEditor(store.extrinsic)
         self.extrinsic_editor.changed.connect(self.extrinsic_changed)
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
-        layout.addLayout(tables, 1)
+        layout.addWidget(self.stats_table, 1)
         layout.addWidget(self.summary)
         layout.addWidget(QLabel("Fitted transform"))
         layout.addWidget(self.transform_view)
@@ -254,8 +253,7 @@ class AnalysisPanel(QWidget):
         self._analyzed_track = shifted
         self.apply_transform_button.setEnabled(True)
 
-        self.before_table.show_stats(report.before)
-        self.after_table.show_stats(report.after)
+        self.stats_table.show_stats(report.before, report.after)
         self.transform_view.setPlainText(
             "\n".join(
                 "  ".join(f"{value:9.4f}" for value in row)
