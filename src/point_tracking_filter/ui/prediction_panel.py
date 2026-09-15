@@ -33,6 +33,7 @@ from ..core.prediction import (
     SmoothedOffset,
     SpeedScheduledKalman,
     StreamConfig,
+    WindowedSplineRefit,
     ZeroOrderHold,
     estimate_noise,
     oracle,
@@ -73,11 +74,26 @@ class PredictionPanel(QWidget):
         self.fixed_box.setChecked(True)
         self.scheduled_box = QCheckBox("Kalman, speed-scheduled")
         self.scheduled_box.setChecked(True)
+        self.spline_box = QCheckBox("Windowed spline refit")
         self.offset_box = QCheckBox("Damp the extrapolated part")
 
         self.sigma_a_spin = self._noise_spin(7.0, "Process noise of the fixed filter.")
         self.sigma_slow_spin = self._noise_spin(3.0, "Process noise when nearly still.")
         self.sigma_fast_spin = self._noise_spin(15.0, "Process noise at full speed.")
+
+        self.spline_window_spin = QDoubleSpinBox()
+        self.spline_window_spin.setRange(10.0, 2000.0)
+        self.spline_window_spin.setValue(300.0)
+        self.spline_window_spin.setSingleStep(10.0)
+        self.spline_window_spin.setSuffix(" ms")
+        self.spline_window_spin.setToolTip("Trailing window refit on every update.")
+
+        self.spline_smoothing_spin = QDoubleSpinBox()
+        self.spline_smoothing_spin.setDecimals(3)
+        self.spline_smoothing_spin.setRange(0.0, 1000.0)
+        self.spline_smoothing_spin.setValue(0.05)
+        self.spline_smoothing_spin.setSingleStep(0.01)
+        self.spline_smoothing_spin.setToolTip("Smoothing penalty passed to the GCV spline backend.")
 
         self.offset_tau_spin = QDoubleSpinBox()
         self.offset_tau_spin.setRange(0.0, 1000.0)
@@ -122,6 +138,8 @@ class PredictionPanel(QWidget):
         variant_layout.addRow(self.scheduled_box)
         variant_layout.addRow("  slow / fast", self.sigma_slow_spin)
         variant_layout.addRow("", self.sigma_fast_spin)
+        variant_layout.addRow(self.spline_box, self.spline_window_spin)
+        variant_layout.addRow("  smoothing", self.spline_smoothing_spin)
         variant_layout.addRow(self.offset_box, self.offset_tau_spin)
 
         layout = QVBoxLayout(self)
@@ -211,6 +229,13 @@ class PredictionPanel(QWidget):
                     sigma_slow=self.sigma_slow_spin.value(),
                     sigma_fast=self.sigma_fast_spin.value(),
                     sigma_m=sigma_m,
+                )
+            )
+        if self.spline_box.isChecked():
+            chosen.append(
+                WindowedSplineRefit(
+                    window_seconds=self.spline_window_spin.value() / 1000.0,
+                    smoothing=self.spline_smoothing_spin.value(),
                 )
             )
         if not self.offset_box.isChecked():
