@@ -103,6 +103,28 @@ The rotation matrix $\mathbf{R}$ and the translation vector $\mathbf{t}$ map the
 The coordinate system of the stereo camera has its origin at the optical center of the left camera lens, with the axes defined as x right, y up, and z forward from the point of view of the camera.
 The tracking markers are rigidly attached to the camera, such that their positions can simply be measured once in the CAD model of the tracking marker mount and treated as constants.
 
+Because the marker positions measured by the \emph{OptiTrack} system are subject to noise, the equation above can in general only be satisfied approximately.
+$\mathbf{R}$ and $\mathbf{t}$ are therefore determined as the solution of the least squares problem
+\[
+  \min_{\mathbf{R}, \mathbf{t}} \sum_{n=1}^{3} \lVert \mathbf{R} \mathbf{p_n} + \mathbf{t} - \mathbf{p'_n} \rVert^2
+  \quad \text{subject to} \quad \mathbf{R}^\top \mathbf{R} = \mathbf{I},
+\]
+which is solved with the algorithm of Kabsch \cite{kabsch1976, kabsch1978}.
+First, both point sets are centered at their centroids $\bar{\mathbf{p}}$ and $\bar{\mathbf{p}}'$, which reduces the problem to finding $\mathbf{R}$; the translation then follows as $\mathbf{t} = \bar{\mathbf{p}}' - \mathbf{R} \bar{\mathbf{p}}$.
+With the cross-covariance matrix of the centered point sets and its singular value decomposition
+\[
+  \mathbf{H} = \sum_{n=1}^{3} (\mathbf{p_n} - \bar{\mathbf{p}})(\mathbf{p'_n} - \bar{\mathbf{p}}')^\top = \mathbf{U} \mathbf{\Sigma} \mathbf{V}^\top,
+\]
+the optimal matrix is
+\[
+  \mathbf{R} = \mathbf{V} \mathbf{D} \mathbf{U}^\top,
+  \qquad
+  \mathbf{D} = \operatorname{diag}(1, 1, d).
+\]
+In the usual formulation, $d = \operatorname{sgn} \det(\mathbf{V} \mathbf{U}^\top)$ ensures $\det \mathbf{R} = +1$, so that $\mathbf{R}$ is a proper rotation \cite{kabsch1978}.
+Here, however, the coordinate system of the stereo camera described above is left-handed, while that of the \emph{OptiTrack} system is right-handed.
+No proper rotation can map one onto the other, so $d = -\operatorname{sgn} \det(\mathbf{V} \mathbf{U}^\top)$ is chosen instead, which yields $\det \mathbf{R} = -1$, i.e., $\mathbf{R}$ contains a reflection in addition to a rotation.
+
 \section{Evaluation}
 \label{sec:evaluation}
 
