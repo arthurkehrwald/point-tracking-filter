@@ -169,69 +169,12 @@ The smoothing spline is the function $g$ with square-integrable second derivativ
 The first term measures how closely $g$ follows the samples, the second term measures its curvature, and the smoothing parameter $\lambda$ weighs the two against each other.
 For $\lambda = 0$, $g$ interpolates the samples; for $\lambda \to \infty$, the curvature is forced to zero and $g$ becomes the least squares line through the samples.
 
-Although the minimization runs over an infinite-dimensional function space, its solution is always a \emph{natural cubic spline} with knots at the timestamps \cite{reinsch1967}:
-a cubic polynomial on each interval $[t_j, t_{j+1}]$, twice continuously differentiable at the knots and with $g''(t_1) = g''(t_n) = 0$.
-With a basis $N_1, \dots, N_n$ of this $n$-dimensional spline space, $g = \sum_i c_i N_i$, the matrix $\mathbf{N}$ with entries $N_{ji} = N_i(t_j)$, and the penalty matrix $\Omega_{ik} = \int N_i''(t) N_k''(t) \, dt$, \cref{eq:spline-objective} becomes the quadratic problem
-\[
-  J_\lambda(\mathbf{c}) = \lVert \mathbf{y} - \mathbf{N} \mathbf{c} \rVert^2 + \lambda \, \mathbf{c}^\top \mathbf{\Omega} \mathbf{c},
-  \qquad
-  \mathbf{c} = (\mathbf{N}^\top \mathbf{N} + \lambda \mathbf{\Omega})^{-1} \mathbf{N}^\top \mathbf{y}.
-\]
-The smoothed values at the timestamps are therefore a linear function of the measurements,
-\begin{equation}
-  \label{eq:smoother-matrix}
-  \hat{\mathbf{y}} = \mathbf{S}_\lambda \mathbf{y},
-  \qquad
-  \mathbf{S}_\lambda = \mathbf{N} (\mathbf{N}^\top \mathbf{N} + \lambda \mathbf{\Omega})^{-1} \mathbf{N}^\top.
-\end{equation}
-In a B-spline basis, both matrices are banded, so the system can be solved in $O(n)$ operations.
-
 \subsection{Generalized cross-validation}
 
 The result depends strongly on $\lambda$, and a suitable value depends on the noise level and on the motion, both of which differ between recordings and between coordinates.
 Instead of setting $\lambda$ by hand, it is chosen for each segment and coordinate by generalized cross-validation (GCV).
-The idea is based on leave-one-out cross-validation: if $\hat g^{[-j]}$ denotes the spline fitted without sample $j$, a good $\lambda$ minimizes $\frac{1}{n} \sum_j (y_j - \hat g^{[-j]}(t_j))^2$, i.e., the spline predicts samples it has not seen.
-For linear smoothers such as \cref{eq:smoother-matrix}, this criterion does not require $n$ separate fits, since $y_j - \hat g^{[-j]}(t_j) = (y_j - \hat y_j) / (1 - S_{jj})$.
-GCV replaces the individual diagonal elements $S_{jj}$ by their mean \cite{craven1979}:
-\begin{equation}
-  \label{eq:gcv}
-  V(\lambda) = \frac{\frac{1}{n} \lVert (\mathbf{I} - \mathbf{S}_\lambda) \mathbf{y} \rVert^2}{\bigl(\frac{1}{n} \operatorname{tr}(\mathbf{I} - \mathbf{S}_\lambda)\bigr)^2}.
-\end{equation}
-The numerator is the mean squared residual.
-The denominator grows with $\lambda$, because $\operatorname{tr} \mathbf{S}_\lambda$, the effective number of parameters of the fit, decreases from $n$ (interpolation) to $2$ (a line).
-Minimizing $V$ thus penalizes both a spline that fits the noise and one that ignores the data.
-For white measurement noise, the minimizer of $V$ asymptotically minimizes the expected mean squared error between the spline and the true function \cite{craven1979}.
-The implementation uses \texttt{make\_smoothing\_spline} from SciPy \cite{scipy2020}, which evaluates the trace in \cref{eq:gcv} in $O(n)$ operations \cite{hutchinson1985} and chooses $\lambda$ separately for each coordinate.
+The implementation uses \texttt{make\_smoothing\_spline} from SciPy \cite{scipy2020}, which chooses $\lambda$ separately for each coordinate.
 Segments with fewer than five samples are passed through unchanged.
-
-\subsection{Interpretation}
-\label{sec:spline-interpretation}
-
-Two properties of the smoothing spline are needed to interpret the results later.
-First, away from the ends of a segment and for a constant sampling interval $\Delta$, $\mathbf{S}_\lambda$ acts like a convolution with a fixed kernel \cite{silverman1984}.
-Replacing the sum in \cref{eq:spline-objective} by $\frac{1}{\Delta} \int (y - g)^2 \, dt$ and applying Parseval's theorem, the objective is minimized separately at each frequency $f$, which yields the transfer function
-\begin{equation}
-  \label{eq:transfer}
-  H(f) = \frac{1}{1 + \lambda \Delta \, (2 \pi f)^4},
-  \qquad
-  f_c = \frac{1}{2 \pi} (\lambda \Delta)^{-1/4}.
-\end{equation}
-The smoothing spline is a low-pass filter with gain $\frac{1}{2}$ at $f_c$ and a steep roll-off of $f^{-4}$ above it.
-Errors whose frequency lies below $f_c$ pass through it unchanged, no matter whether they are motion or measurement error.
-
-Second, the smoothing spline has a stochastic interpretation \cite{wahba1978}.
-Assume the coordinate follows a motion model with white-noise acceleration, $g''(t) = \sigma_a \, w(t)$ where $w$ is white noise with unit intensity, with unknown initial position and velocity, and assume that the measurements $y_j = g(t_j) + \varepsilon_j$ contain independent noise $\varepsilon_j \sim \mathcal{N}(0, \sigma_m^2)$.
-The negative log posterior is then, up to constants,
-\[
-  \frac{1}{2 \sigma_m^2} \sum_{j=1}^{n} \bigl(y_j - g(t_j)\bigr)^2 + \frac{1}{2 \sigma_a^2} \int g''(t)^2 \, dt,
-\]
-which is $J_\lambda / (2 \sigma_m^2)$ with
-\begin{equation}
-  \label{eq:lambda-noise}
-  \lambda = \frac{\sigma_m^2}{\sigma_a^2}.
-\end{equation}
-The smoothing spline is therefore the best estimate of the trajectory under a constant-velocity model disturbed by random accelerations, and $\lambda$ is the ratio between measurement noise and process noise.
-This connects the offline filter to the Kalman filter in \cref{sec:prediction}.
 
 \section{Prediction}
 \label{sec:prediction}
@@ -245,53 +188,16 @@ The position must therefore be predicted.
 
 Sample $j$ is captured at $t_j$ but becomes available only at $a_j = t_j + \ell_j$, where the camera and processing latency $\ell_j$ is taken per sample from the detection timestamps in the \emph{OAK-D} recording.
 A display requests a position at the instants $\tau_k = \tau_0 + k \Delta$, $\Delta = 1/75$~s, and needs the position at $\tau_k + h$, where $h$ is the latency still ahead (transport, rendering, and display).
-With $m(k) = \max \{ j : a_j \leq \tau_k \}$ the newest available sample, the prediction has to bridge the lead
-\begin{equation}
-  \label{eq:lead}
-  L_k = \tau_k + h - t_{m(k)} \geq h + \ell_{m(k)}.
-\end{equation}
 To evaluate predictors under exactly these conditions, the recordings are replayed:
 at each $\tau_k$, the predictor receives the samples with $a_j \leq \tau_k$ that it has not seen yet, is asked for the position at $\tau_k + h$, and the answer is stored with the timestamp $\tau_k + h$, so that it can be compared with the ground truth at the time it refers to.
 A predictor never has access to later samples, which is also verified by a test ensuring that truncating a recording does not change any earlier output.
-
 The simplest predictor, the \emph{zero-order hold}, returns the newest sample $y_{m(k)}$ and serves as the baseline.
-For a target moving with velocity $\mathbf{v}$, its error is approximately $\mathbf{v} L_k$, i.e., the display lags behind the motion by the entire latency.
-All other predictors considered here estimate a position $\hat{\mathbf{p}}$ and a velocity $\hat{\mathbf{v}}$ at $t_{m(k)}$ and extrapolate linearly.
-With the true position $\mathbf{p}$, velocity $\mathbf{v}$, and acceleration $\mathbf{a}$ at $t_{m(k)}$, a Taylor expansion gives the error
-\begin{equation}
-  \label{eq:prediction-error}
-  \hat{\mathbf{p}} + \hat{\mathbf{v}} L - \mathbf{p}(t_{m(k)} + L)
-  = (\hat{\mathbf{p}} - \mathbf{p}) + (\hat{\mathbf{v}} - \mathbf{v}) L - \tfrac{1}{2} \mathbf{a} L^2 + O(L^3).
-\end{equation}
-The three terms describe the error of the position estimate, the error of the velocity estimate amplified by the lead, and the unmodelled acceleration, which grows quadratically with the lead.
-The velocity term contains a conflict:
-estimating $\hat{\mathbf{v}}$ from few recent samples amplifies the measurement noise, while averaging over a longer past reduces the noise but biases $\hat{\mathbf{v}}$ towards past velocities whenever the target accelerates.
 
 \subsection{Windowed spline extrapolation}
 
-The spline approach of \cref{sec:filtering} is adapted to real time by fitting a smoothing spline to the samples of a trailing window $[t_{m(k)} - W, t_{m(k)}]$ for every requested frame and evaluating it at $t_{m(k)} + L_k$.
-The window is $W = 300$~ms long, i.e., it contains about 22 samples.
-The smoothing parameter is fixed instead of being chosen by GCV:
-on so few samples, $V(\lambda)$ is flat and its minimizer jumps from one window to the next, which makes the output jump as well.
-
-Beyond its last knot, the spline continues its last cubic piece.
-With $m = m(k)$ and the last sampling interval $\delta_m = t_m - t_{m-1}$, the natural boundary condition $g''(t_m) = 0$ turns the extrapolation into
-\begin{equation}
-  \label{eq:spline-extrapolation}
-  g(t_m + L) = g(t_m) + g'(t_m) L + \tfrac{1}{6} g'''(t_m^-) L^3,
-  \qquad
-  g'''(t_m^-) = -\frac{g''(t_{m-1})}{\delta_m}.
-\end{equation}
-Apart from the cubic term, the spline extrapolation is a linear extrapolation with $\hat{\mathbf{p}} = g(t_m)$ and $\hat{\mathbf{v}} = g'(t_m)$ in \cref{eq:prediction-error}.
-Both are estimated at the end of the window, where the boundary condition forces the fitted acceleration to zero.
-When the target accelerates, the fit compensates for this with a velocity that lags behind.
-For a target with constant acceleration $1000~\text{cm/s}^2$ sampled at 75~Hz, for example, the velocity at the end of the window is estimated as 149~cm/s for $\lambda = 0.05$ instead of the true 293~cm/s, and as 252~cm/s for $\lambda = 10^{-4}$.
-The lag grows with the width $(\lambda \Delta)^{1/4}$ of the smoothing kernel from \cref{eq:transfer}.
-
-The cubic term continues the curvature of the last piece, which decreases linearly to zero at $t_m$, beyond the knot:
-the extrapolated acceleration $g''(t_m + s) = -g''(t_{m-1}) \, s / \delta_m$ has the opposite sign of the fitted acceleration and grows with $s / \delta_m$.
-For short leads, this is negligible, but the term grows with $L^3$.
-In the example above with $\lambda = 1.6 \cdot 10^{-4}$ (the value tuned in \cref{sec:evaluation}), it adds 0.04~cm to the prediction error for $L = 32$~ms, 0.66~cm for $L = 82$~ms, and 2.8~cm for $L = 132$~ms.
+The spline approach of \cref{sec:filtering} is adapted to real time by fitting a smoothing spline to the samples of a 300~ms trailing window which contains about 22 samples.
+The smoothing parameter is fixed instead of being chosen by GCV\@.
+On so few samples, individual samples entering and exiting the trailing window make GCV behave erratically.
 
 \subsection{Constant-velocity Kalman filter}
 
@@ -357,8 +263,8 @@ In practice, the two methods differ in the following respects:
 \subsection{Setup and metrics}
 
 The evaluation uses the four recordings of slow movements (\emph{slow2}--\emph{slow5}) and three of the four recordings of fast movements (\emph{fast2}--\emph{fast4}).
-The recording \emph{fast1} is excluded because its two tracks cannot be aligned:
-even after fitting the transform to the LED coordinates, the deviation remains at an RMSE of 34.7~cm, so at least one of the two tracks does not follow the LED for a longer period.
+The recording \emph{fast1} is excluded because its two tracks cannot be aligned.
+The two versions contain completely different movements due to user error during recording.
 All \emph{OAK-D} tracks are mapped into the \emph{OptiTrack} frame with the transform fitted to the LED coordinates as described in \cref{sec:sync}, so that the remaining deviations are those a filter could in principle affect.
 Movement speeds (from the \emph{OptiTrack} tracks) have a median of about 5--8~cm/s and a 95th percentile of 35--49~cm/s for the slow recordings, and a median of 95--121~cm/s and a 95th percentile of 190--206~cm/s for the fast recordings.
 All scripts and generated tables are part of the project repository.
