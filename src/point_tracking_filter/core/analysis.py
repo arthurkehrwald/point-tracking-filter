@@ -28,6 +28,7 @@ class DeviationStats:
     rmse: float = float("nan")
     median: float = float("nan")
     p95: float = float("nan")
+    p99: float = float("nan")
 
     def as_rows(self) -> list[tuple[str, str]]:
         """Human readable ``(label, value)`` rows for display in a table."""
@@ -46,6 +47,7 @@ class DeviationStats:
             ("RMSE [cm]", f"{self.rmse:.3f}"),
             ("Median [cm]", f"{self.median:.3f}"),
             ("95th percentile [cm]", f"{self.p95:.3f}"),
+            ("99th percentile [cm]", f"{self.p99:.3f}"),
         ]
         return rows
 
@@ -131,6 +133,7 @@ def stats_from_points(
         rmse=float(np.sqrt(np.mean(distance**2))),
         median=float(np.median(distance)),
         p95=float(np.percentile(distance, 95)),
+        p99=float(np.percentile(distance, 99)),
     )
 
 
