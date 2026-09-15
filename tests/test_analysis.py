@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from point_tracking_filter.core.analysis import (
-    TRANSFORM_MODELS,
     AnalysisError,
     apply_transform,
     best_fit_transform,
@@ -74,50 +73,30 @@ def test_non_overlapping_tracks_report_zero_samples():
     assert np.isnan(stats.euclidean_mean)
 
 
-@pytest.mark.parametrize("model", TRANSFORM_MODELS)
-def test_best_fit_recovers_a_known_transform(model):
+def test_best_fit_recovers_a_known_transform():
     points = RNG.normal(size=(300, 3)) * 10.0
 
     transform = np.eye(4)
     transform[:3, :3] = rotation_from_euler((7.0, -11.0, 23.0))
     transform[:3, 3] = [1.5, -2.0, 0.75]
-    if model in ("similarity", "affine", "projective"):
-        transform[:3, :3] *= 1.2
-    if model in ("affine", "projective"):
-        transform[0, 1] += 0.15
 
     target = apply_transform(transform, points)
-    fitted = best_fit_transform(points, target, model)
+    fitted = best_fit_transform(points, target)
     np.testing.assert_allclose(apply_transform(fitted, points), target, atol=1e-6)
 
 
 def test_rigid_fit_ignores_scale():
     points = RNG.normal(size=(100, 3))
-    fitted = best_fit_transform(points, points * 2.0, "rigid")
+    fitted = best_fit_transform(points, points * 2.0)
     assert np.linalg.det(fitted[:3, :3]) == pytest.approx(1.0)
 
 
 def test_best_fit_requires_enough_points():
     with pytest.raises(AnalysisError, match="at least 4 point pairs"):
-        best_fit_transform(np.zeros((3, 3)), np.zeros((3, 3)), "rigid")
+        best_fit_transform(np.zeros((3, 3)), np.zeros((3, 3)))
 
 
-def test_best_fit_rejects_unknown_model():
-    points = RNG.normal(size=(10, 3))
-    with pytest.raises(AnalysisError, match="unknown transform model"):
-        best_fit_transform(points, points, "magic")
-
-
-def test_projective_falls_back_on_planar_data():
-    planar = RNG.normal(size=(200, 3))
-    planar[:, 2] = 0.0
-    warnings: list[str] = []
-    best_fit_transform(planar, planar + 1.0, "projective", warnings)
-    assert any("nearly planar" in message for message in warnings)
-
-
-@pytest.mark.parametrize("model", TRANSFORM_MODELS)
-def test_consistency_report_never_gets_worse(model):
+def test_consistency_report_never_gets_worse():
     truth = _curve(n=400)
     analyzed = truth.copy()
     analyzed.xyz = apply_transform(
@@ -132,8 +111,7 @@ def test_consistency_report_never_gets_worse(model):
         truth.xyz,
     ) + RNG.normal(scale=0.01, size=(len(truth), 3))
 
-    report = consistency_report(analyzed, truth, model)
-    assert report.model == model
+    report = consistency_report(analyzed, truth)
     assert report.after.euclidean_mean <= report.before.euclidean_mean
     assert report.improvement >= 0.0
     assert report.after.n_samples == report.before.n_samples
@@ -144,7 +122,7 @@ def test_consistency_report_removes_a_systematic_offset():
     analyzed = truth.copy()
     analyzed.xyz = truth.xyz + np.array([2.0, -1.0, 0.5])
 
-    report = consistency_report(analyzed, truth, "rigid")
+    report = consistency_report(analyzed, truth)
     assert report.before.euclidean_mean == pytest.approx(np.linalg.norm([2.0, -1.0, 0.5]))
     assert report.after.euclidean_mean < 1e-6
     assert report.warnings == []
@@ -153,7 +131,7 @@ def test_consistency_report_removes_a_systematic_offset():
 def test_consistency_report_with_too_few_samples():
     truth = _curve(n=50, start=0.0)
     other = _curve(n=50, start=100.0)
-    report = consistency_report(other, truth, "rigid")
+    report = consistency_report(other, truth)
 
     np.testing.assert_allclose(report.transform, np.eye(4))
     assert any("too few" in message for message in report.warnings)

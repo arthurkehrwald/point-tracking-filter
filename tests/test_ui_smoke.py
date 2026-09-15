@@ -82,10 +82,8 @@ def test_full_workflow(window):
     panel = window.analysis_panel
     panel.analyzed_box.setCurrentIndex(panel.analyzed_box.findData(oak.led.name))
     panel.truth_box.setCurrentIndex(panel.truth_box.findData(opti.led.name))
-    for model_index in range(panel.model_box.count()):
-        panel.model_box.setCurrentIndex(model_index)
-        panel.analyze()
-        assert "comparable samples" in panel.summary.text()
+    panel.analyze()
+    assert "comparable samples" in panel.summary.text()
 
     # Comparing arbitrary tracks against the ground truth.
     for row in range(panel.compare_list.count()):

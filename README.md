@@ -29,9 +29,8 @@ identified, is reported in the warning banner.
 
 The shipped `config/extrinsic.toml` is a placeholder with the right side lengths but a guessed pose, so the absolute
 deviation still contains a systematic component until the real measurements are entered. The "consistency of deviations"
-analysis quantifies how much of the deviation is frame misalignment: on the sample recordings the affine model leaves a
-residual of a few millimeters while the rigid and similarity models do not, which indicates that the two systems use
-opposite handedness.
+analysis quantifies how much of the deviation is frame misalignment by fitting the best rigid transform between the two
+tracks and comparing the residual before and after.
 
 The `+x` right, `+y` up, `+z` forward convention used for the markers is left-handed, while Optitrack's global frame is
 right-handed, so a pure rotation can never fit both the markers and the LED at once — the marker triangle alone fits

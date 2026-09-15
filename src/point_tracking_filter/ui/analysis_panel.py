@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
 
 from ..core.align import CameraExtrinsic, save_extrinsic
 from ..core.analysis import (
-    TRANSFORM_MODELS,
     AnalysisError,
     ConsistencyReport,
     consistency_report,
@@ -205,10 +204,6 @@ class AnalysisPanel(QWidget):
         self.offset_spin.setDecimals(3)
         self.offset_spin.setSuffix(" s")
 
-        self.model_box = QComboBox()
-        for model in TRANSFORM_MODELS:
-            self.model_box.addItem(model.capitalize(), model)
-
         analyze_button = QPushButton("Analyze")
         analyze_button.clicked.connect(self.analyze)
 
@@ -219,7 +214,6 @@ class AnalysisPanel(QWidget):
         form = QFormLayout(group)
         form.addRow("Analyzed", self.analyzed_box)
         form.addRow("Sync offset", self.offset_spin)
-        form.addRow("Transform model", self.model_box)
         form.addRow(analyze_button)
         form.addRow(self.apply_transform_button)
 
@@ -301,7 +295,7 @@ class AnalysisPanel(QWidget):
             return
 
         shifted = analyzed.shifted(self.offset_spin.value())
-        report = consistency_report(shifted, truth, self.model_box.currentData())
+        report = consistency_report(shifted, truth)
         self.report = report
         self._analyzed_track = shifted
         self.apply_transform_button.setEnabled(True)
@@ -316,7 +310,7 @@ class AnalysisPanel(QWidget):
         messages = [
             f"{report.before.n_samples} comparable samples, "
             f"{report.before.n_excluded} excluded.",
-            f"The best {report.model} transform reduces the mean deviation by "
+            "The best rigid transform reduces the mean deviation by "
             f"{report.improvement:.3f} cm to {report.after.euclidean_mean:.3f} cm, "
             "which is the frame-independent tracking error.",
         ]
@@ -328,7 +322,7 @@ class AnalysisPanel(QWidget):
         if self.report is None:
             return
         corrected = transformed_track(
-            self._analyzed_track, self.report.transform, suffix=f"{self.report.model} fit"
+            self._analyzed_track, self.report.transform, suffix="rigid fit"
         )
         self.track_produced.emit(corrected)
 

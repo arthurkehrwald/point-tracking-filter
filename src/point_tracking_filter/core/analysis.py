@@ -3,23 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
 
 import numpy as np
-from scipy.optimize import least_squares
 
 from .model import Track
 
-TransformModel = Literal["rigid", "similarity", "affine", "projective"]
-TRANSFORM_MODELS: tuple[TransformModel, ...] = (
-    "rigid",
-    "similarity",
-    "affine",
-    "projective",
-)
-
 MAX_GAP_FACTOR = 3.0
-PLANARITY_TOL = 1e-3
 
 
 class AnalysisError(ValueError):
@@ -65,7 +54,6 @@ class DeviationStats:
 class ConsistencyReport:
     """Before/after deviation for the single best-fit transform."""
 
-    model: TransformModel
     before: DeviationStats
     after: DeviationStats
     transform: np.ndarray
@@ -293,77 +281,8 @@ def _homogeneous(linear: np.ndarray, translation: np.ndarray) -> np.ndarray:
     return transform
 
 
-def _fit_kabsch(source: np.ndarray, target: np.ndarray, allow_scale: bool) -> np.ndarray:
-    source_mean = source.mean(axis=0)
-    target_mean = target.mean(axis=0)
-    a = source - source_mean
-    b = target - target_mean
-
-    u, singular, vt = np.linalg.svd(a.T @ b)
-    correction = np.eye(3)
-    correction[2, 2] = np.sign(np.linalg.det(vt.T @ u.T))
-    rotation = vt.T @ correction @ u.T
-
-    scale = 1.0
-    if allow_scale:
-        variance = float(np.sum(a**2))
-        if variance > 0:
-            scale = float(np.sum(singular * np.diag(correction)) / variance)
-    linear = scale * rotation
-    return _homogeneous(linear, target_mean - linear @ source_mean)
-
-
-def _fit_affine(source: np.ndarray, target: np.ndarray) -> np.ndarray:
-    design = np.hstack([source, np.ones((source.shape[0], 1))])
-    solution, *_ = np.linalg.lstsq(design, target, rcond=None)
-    return _homogeneous(solution[:3].T, solution[3])
-
-
-def _planarity(points: np.ndarray) -> float:
-    """Smallest relative singular value of the centered point cloud."""
-    centered = points - points.mean(axis=0)
-    singular = np.linalg.svd(centered, compute_uv=False)
-    if singular[0] <= 0:
-        return 0.0
-    return float(singular[-1] / singular[0])
-
-
-def _fit_projective(
-    source: np.ndarray, target: np.ndarray, warnings: list[str]
-) -> np.ndarray:
-    if _planarity(source) < PLANARITY_TOL:
-        warnings.append(
-            "The trajectory is nearly planar, the projective fit is ill-conditioned; "
-            "falling back to the affine model."
-        )
-        return _fit_affine(source, target)
-
-    initial = _fit_affine(source, target)
-
-    def residual(parameters: np.ndarray) -> np.ndarray:
-        transform = np.eye(4)
-        transform.flat[:15] = parameters
-        predicted = apply_transform(transform, source)
-        difference = predicted - target
-        return np.where(np.isfinite(difference), difference, 1e6).ravel()
-
-    result = least_squares(residual, initial.ravel()[:15], method="lm", max_nfev=2000)
-    transform = np.eye(4)
-    transform.flat[:15] = result.x
-
-    if not np.all(np.isfinite(apply_transform(transform, source))):
-        warnings.append("The projective fit degenerated; falling back to the affine model.")
-        return initial
-    return transform
-
-
-def best_fit_transform(
-    source: np.ndarray,
-    target: np.ndarray,
-    model: TransformModel = "rigid",
-    warnings: list[str] | None = None,
-) -> np.ndarray:
-    """Single 4x4 transform mapping ``source`` points onto ``target``."""
+def best_fit_transform(source: np.ndarray, target: np.ndarray) -> np.ndarray:
+    """Single 4x4 rigid transform (rotation + translation) mapping ``source`` onto ``target``."""
     source = np.asarray(source, dtype=float).reshape(-1, 3)
     target = np.asarray(target, dtype=float).reshape(-1, 3)
     if source.shape != target.shape:
@@ -372,26 +291,25 @@ def best_fit_transform(
         raise AnalysisError(
             f"at least 4 point pairs are needed to fit a transform, got {source.shape[0]}"
         )
-    warnings = warnings if warnings is not None else []
 
-    if model == "rigid":
-        return _fit_kabsch(source, target, allow_scale=False)
-    if model == "similarity":
-        return _fit_kabsch(source, target, allow_scale=True)
-    if model == "affine":
-        return _fit_affine(source, target)
-    if model == "projective":
-        return _fit_projective(source, target, warnings)
-    raise AnalysisError(f"unknown transform model {model!r}")
+    source_mean = source.mean(axis=0)
+    target_mean = target.mean(axis=0)
+    a = source - source_mean
+    b = target - target_mean
+
+    u, _, vt = np.linalg.svd(a.T @ b)
+    correction = np.eye(3)
+    correction[2, 2] = np.sign(np.linalg.det(vt.T @ u.T))
+    rotation = vt.T @ correction @ u.T
+    return _homogeneous(rotation, target_mean - rotation @ source_mean)
 
 
 def consistency_report(
     track: Track,
     ground_truth: Track,
-    model: TransformModel = "rigid",
     max_gap: float | None = None,
 ) -> ConsistencyReport:
-    """Deviation before and after the best single transform of ``track``.
+    """Deviation before and after the best single rigid transform of ``track``.
 
     The residual after fitting is the frame-independent tracking error; the
     part removed by the transform is systematic frame misalignment.
@@ -401,7 +319,6 @@ def consistency_report(
 
     if analyzed.shape[0] < 4:
         return ConsistencyReport(
-            model=model,
             before=before,
             after=before,
             transform=np.eye(4),
@@ -410,18 +327,18 @@ def consistency_report(
             ],
         )
 
-    warnings: list[str] = []
-    transform = best_fit_transform(analyzed, truth, model, warnings)
+    transform = best_fit_transform(analyzed, truth)
     corrected = apply_transform(transform, analyzed)
     after = stats_from_points(corrected, truth, n_excluded)
 
+    warnings: list[str] = []
     if not np.isfinite(after.euclidean_mean) or after.euclidean_mean > before.euclidean_mean:
         warnings.append("The fitted transform did not improve the deviation; keeping identity.")
         transform = np.eye(4)
         after = before
 
     return ConsistencyReport(
-        model=model, before=before, after=after, transform=transform, warnings=warnings
+        before=before, after=after, transform=transform, warnings=warnings
     )
 
 
