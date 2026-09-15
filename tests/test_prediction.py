@@ -8,19 +8,14 @@ from point_tracking_filter.core.model import Track
 from point_tracking_filter.core.prediction import (
     DEFAULT_CAMERA_LATENCY,
     PredictionError,
-    Score,
     StreamConfig,
     WindowedSplineRefit,
     ZeroOrderHold,
     compare,
-    holding_rmse,
     oracle,
     output_times,
-    references_for,
     sample_latency,
-    score,
     simulate,
-    tune,
 )
 
 
@@ -283,49 +278,5 @@ def test_compare_reports_every_pairing():
         assert np.isfinite(row["rmse"])
         assert np.isfinite(row["jerk_ratio"])
         assert row["us_per_update"] > 0
-
-
-def _noisy_wobble(n: int = 600, scale: float = 0.1, seed: int = 3) -> Track:
-    rng = np.random.default_rng(seed)
-    track = _wobble(n=n)
-    track.xyz = track.xyz + rng.normal(scale=scale, size=track.xyz.shape)
-    return track
-
-
-def test_cost_is_driven_by_the_worst_recording():
-    """Averaging would let an over-represented regime pick the parameter."""
-    passing = Score(rmses=[1.0], jerk_ratios=[2.0], baseline_rmses=[2.0])
-    failing = Score(rmses=[9.0], jerk_ratios=[2.0], baseline_rmses=[2.0])
-    both = Score(
-        rmses=[1.0, 9.0], jerk_ratios=[2.0, 2.0], baseline_rmses=[2.0, 2.0]
-    )
-
-    assert both.cost == pytest.approx(failing.cost)
-    assert both.cost > np.mean([passing.cost, failing.cost])
-    assert not both.beats_holding
-    assert passing.beats_holding
-
-
-def test_tuning_improves_on_a_bad_starting_point():
-    tracks = [_noisy_wobble(n=500, seed=8), _noisy_wobble(n=500, seed=9)]
-    config = StreamConfig(horizon=0.05, camera_latency=0.025, output_hz=RATE)
-    references = references_for(tracks, config)
-    baselines = holding_rmse(tracks, config, references)
-
-    result = tune(
-        tracks,
-        lambda value: WindowedSplineRefit(smoothing=value),
-        (1e-6, 10.0),
-        config,
-        references,
-        steps=6,
-    )
-    # A vanishing penalty extrapolates the noise of the newest samples.
-    awful = score(
-        tracks, WindowedSplineRefit(smoothing=1e-6), config, references, baselines
-    )
-    assert result.score.cost < awful.cost
-    assert 1e-6 <= result.value <= 10.0
-    assert result.evaluated > 1
 
 

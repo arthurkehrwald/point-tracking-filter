@@ -84,7 +84,4 @@ cannot see this, so predictions are also scored on smoothness relative to the of
 Predictors are causal by construction and the replay harness enforces it: each one only ever sees samples that had
 arrived by the time it was asked. Available variants are a zero-order hold (the cost of not predicting) and a windowed
 spline refit, which fits a smoothing spline to a trailing window of samples on every frame and extrapolates it to the
-target time.
-
-Parameters are fitted against the worst recording rather than the average, because averaging lets whichever regime is
-over-represented in the tuning set pick a value that then fails elsewhere.
+target time. Its smoothing parameter is set manually (default `1e-4`).

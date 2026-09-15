@@ -23,6 +23,7 @@ from .model import Track
 
 DEFAULT_HORIZON = 0.05
 DEFAULT_CAMERA_LATENCY = 0.025
+DEFAULT_SPLINE_SMOOTHING = 1e-4
 
 
 class PredictionError(ValueError):
@@ -164,7 +165,7 @@ class WindowedSplineRefit(_TrailingWindow):
         self,
         window_seconds: float = 0.3,
         backend: str = "gcv",
-        smoothing: float = 0.05,
+        smoothing: float = DEFAULT_SPLINE_SMOOTHING,
         degree: int = 3,
         auto_smoothing: bool = False,
     ) -> None:
@@ -322,184 +323,6 @@ def simulate(track: Track, predictor: Predictor, config: StreamConfig | None = N
             "n_consumed": n_consumed,
             "camera_latency_median": float(np.median(latency)),
         },
-    )
-
-
-@dataclass
-class Score:
-    """How a predictor did across a set of recordings.
-
-    The per-recording figures are kept rather than only their averages,
-    because the recordings sit in very different motion regimes and a mean
-    lets a predictor fail badly on one while passing overall.
-    """
-
-    rmses: list[float]
-    jerk_ratios: list[float]
-    baseline_rmses: list[float]
-
-    @property
-    def rmse(self) -> float:
-        return float(np.mean(self.rmses))
-
-    @property
-    def jerk_ratio(self) -> float:
-        return float(np.mean(self.jerk_ratios))
-
-    @property
-    def baseline_rmse(self) -> float:
-        return float(np.mean(self.baseline_rmses))
-
-    @property
-    def beats_holding(self) -> bool:
-        """True only when every recording clears the bar, not the average."""
-        return all(
-            rmse <= baseline
-            for rmse, baseline in zip(self.rmses, self.baseline_rmses)
-        )
-
-    @staticmethod
-    def _one(rmse: float, jerk_ratio: float, baseline: float) -> float:
-        if not (np.isfinite(rmse) and np.isfinite(jerk_ratio)) or jerk_ratio <= 0:
-            return float("inf")
-        excess = max(0.0, rmse / baseline - 1.0)
-        return abs(np.log(jerk_ratio)) + 100.0 * excess
-
-    @property
-    def costs(self) -> list[float]:
-        """Per-recording cost.
-
-        ``|log(jerk_ratio)|`` is two-sided on purpose: smoothing real motion
-        away is as wrong as adding noise. Accuracy enters as a penalty
-        rather than a term, because the brief is that smoothness matters
-        more -- accuracy only has to be no worse than not predicting at all.
-        """
-        return [
-            self._one(rmse, jerk, baseline)
-            for rmse, jerk, baseline in zip(
-                self.rmses, self.jerk_ratios, self.baseline_rmses
-            )
-        ]
-
-    @property
-    def cost(self) -> float:
-        """Worst recording's cost, not the average.
-
-        Averaging lets whichever regime happens to be over-represented in
-        the tuning set drag the parameter towards itself: with three slow
-        recordings against two fast ones, the mean picks a parameter
-        that then fails on held-out fast motion. The deployed filter has to
-        work in every regime, so it is tuned against its hardest case.
-        """
-        return float(np.max(self.costs))
-
-
-@dataclass
-class TuningResult:
-    """The value the search settled on, and how it did."""
-
-    value: float
-    score: Score
-    evaluated: int
-
-
-def references_for(tracks: list[Track], config: StreamConfig) -> list[Track]:
-    """Offline bounds for each recording, computed once and reused."""
-    return [oracle(track, config) for track in tracks]
-
-
-def holding_rmse(
-    tracks: list[Track], config: StreamConfig, references: list[Track]
-) -> list[float]:
-    """Accuracy of not predicting at all: the bar every candidate must clear."""
-    from .analysis import deviation_stats
-
-    return [
-        deviation_stats(simulate(track, ZeroOrderHold(), config), reference).rmse
-        for track, reference in zip(tracks, references)
-    ]
-
-
-def score(
-    tracks: list[Track],
-    predictor: Predictor,
-    config: StreamConfig,
-    references: list[Track] | None = None,
-    baselines: list[float] | None = None,
-) -> Score:
-    """Average accuracy and jitter of ``predictor`` over ``tracks``."""
-    from .analysis import deviation_stats, smoothness_stats
-
-    references = references or references_for(tracks, config)
-    if baselines is None:
-        baselines = holding_rmse(tracks, config, references)
-    errors, ratios = [], []
-    for track, reference in zip(tracks, references):
-        predicted = simulate(track, predictor, config)
-        errors.append(deviation_stats(predicted, reference).rmse)
-        ratios.append(smoothness_stats(predicted, reference).jerk_ratio)
-    return Score(rmses=errors, jerk_ratios=ratios, baseline_rmses=list(baselines))
-
-
-def tune(
-    tracks: list[Track],
-    factory,
-    bounds: tuple[float, float],
-    config: StreamConfig | None = None,
-    references: list[Track] | None = None,
-    steps: int = 12,
-) -> TuningResult:
-    """Search ``factory``'s single knob for the calmest usable predictor.
-
-    A coarse sweep on a logarithmic grid rather than a gradient method: the
-    cost has a hard constraint penalty in it and the parameter spans orders
-    of magnitude, so a sweep is both more robust and gives the frontier for
-    free.
-    """
-    from scipy.optimize import minimize_scalar
-
-    config = config or StreamConfig()
-    references = references or references_for(tracks, config)
-    baselines = holding_rmse(tracks, config, references)
-    low, high = np.log10(bounds[0]), np.log10(bounds[1])
-    evaluated = 0
-
-    def cost(exponent: float) -> float:
-        nonlocal evaluated
-        evaluated += 1
-        try:
-            return score(
-                tracks, factory(10.0**exponent), config, references, baselines
-            ).cost
-        except (PredictionError, ValueError):
-            return float("inf")
-
-    grid = np.linspace(low, high, steps)
-    costs = [cost(exponent) for exponent in grid]
-    best = int(np.argmin(costs))
-    if not np.isfinite(costs[best]):
-        raise PredictionError("no usable parameter found in the given bounds")
-
-    # Refine inside the bracket around the best grid point.
-    left = grid[max(best - 1, 0)]
-    right = grid[min(best + 1, steps - 1)]
-    if right > left:
-        refined = minimize_scalar(
-            cost, bounds=(left, right), method="bounded", options={"xatol": 1e-2}
-        )
-        if refined.fun <= costs[best]:
-            value = 10.0**refined.x
-            return TuningResult(
-                value=value,
-                score=score(tracks, factory(value), config, references, baselines),
-                evaluated=evaluated,
-            )
-
-    value = 10.0 ** grid[best]
-    return TuningResult(
-        value=value,
-        score=score(tracks, factory(value), config, references, baselines),
-        evaluated=evaluated,
     )
 
 

@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 from ..core.analysis import AnalysisError
 from ..core.model import Track
 from ..core.prediction import (
+    DEFAULT_SPLINE_SMOOTHING,
     PredictionError,
     StreamConfig,
     WindowedSplineRefit,
@@ -71,10 +72,10 @@ class PredictionPanel(QWidget):
         self.spline_window_spin.setToolTip("Trailing window refit on every update.")
 
         self.spline_smoothing_spin = QDoubleSpinBox()
-        self.spline_smoothing_spin.setDecimals(3)
+        self.spline_smoothing_spin.setDecimals(6)
         self.spline_smoothing_spin.setRange(0.0, 1000.0)
-        self.spline_smoothing_spin.setValue(0.05)
-        self.spline_smoothing_spin.setSingleStep(0.01)
+        self.spline_smoothing_spin.setValue(DEFAULT_SPLINE_SMOOTHING)
+        self.spline_smoothing_spin.setSingleStep(1e-5)
         self.spline_smoothing_spin.setToolTip("Smoothing penalty passed to the GCV spline backend.")
 
         show_button = QPushButton("Show in player")

@@ -31,12 +31,12 @@ from point_tracking_filter.core.io.oak_d import load_oak_d
 from point_tracking_filter.core.io.optitrack import load_optitrack
 from point_tracking_filter.core.model import Track
 from point_tracking_filter.core.prediction import (
+    DEFAULT_SPLINE_SMOOTHING,
     StreamConfig,
     WindowedSplineRefit,
     ZeroOrderHold,
     sample_latency,
     simulate,
-    tune,
 )
 from point_tracking_filter.core.sync import normalize_to_led_onset, pair_paths
 
@@ -50,7 +50,7 @@ USED = ["slow2", "slow3", "slow4", "slow5", "fast2", "fast3", "fast4"]
 EXCLUDED = ["fast1"]
 HORIZONS = [0.0, 0.05, 0.1]
 CURVE_HORIZONS = [0.0, 0.025, 0.05, 0.075, 0.1]
-TUNING_HORIZON = 0.05
+SPLINE_HORIZON = 0.05
 SPLINE_WINDOW = 0.3
 
 plt.rcParams.update(
@@ -282,22 +282,6 @@ def run(case: Case, predictor, horizon: float) -> dict:
     }
 
 
-def tune_parameters(cases: list[Case]) -> float:
-    tracks = [c.raw for c in cases]
-    truths = [c.truth for c in cases]
-    config = StreamConfig(horizon=TUNING_HORIZON)
-    spline = tune(
-        tracks,
-        lambda v: WindowedSplineRefit(window_seconds=SPLINE_WINDOW, smoothing=v),
-        (1e-5, 10.0),
-        config,
-        truths,
-        steps=8,
-    )
-    print(f"tuned lambda = {spline.value:.3g}, costs {np.round(spline.score.costs, 2)}")
-    return spline.value
-
-
 def regime_mean(results: dict, cases: list[Case], regime: str, key: str) -> float:
     return float(np.mean([results[c.token][key] for c in cases if c.regime == regime]))
 
@@ -357,7 +341,7 @@ def evaluate_prediction(cases: list[Case], lam: float) -> dict:
 
 
 def sweep(cases: list[Case]) -> dict:
-    config_h = TUNING_HORIZON
+    config_h = SPLINE_HORIZON
     grids = {
         "spline": (np.logspace(-5, 1, 7), lambda v: WindowedSplineRefit(window_seconds=SPLINE_WINDOW, smoothing=v)),
     }
@@ -412,12 +396,12 @@ def figure_prediction_excerpt(cases: list[Case], lam: float) -> None:
     ax.plot(case.truth.t[mask] - start, case.truth.xyz[mask, 2], color=COLORS["truth"], lw=1.2, label="OptiTrack")
     labels = {"hold": "Hold", "spline": "Spline refit"}
     for name, factory in predictors(lam).items():
-        predicted = simulate(case.raw, factory(), StreamConfig(horizon=TUNING_HORIZON))
+        predicted = simulate(case.raw, factory(), StreamConfig(horizon=SPLINE_HORIZON))
         mask = (predicted.t >= start) & (predicted.t <= start + span)
         ax.plot(predicted.t[mask] - start, predicted.xyz[mask, 2], color=COLORS[name], lw=1.0, label=labels[name])
     ax.set_xlabel("target time [s]")
     ax.set_ylabel("$z$ [cm]")
-    ax.set_title(f"{case.token}: depth predicted {TUNING_HORIZON * 1000:.0f} ms ahead")
+    ax.set_title(f"{case.token}: depth predicted {SPLINE_HORIZON * 1000:.0f} ms ahead")
     ax.legend(frameon=False, ncol=3)
     fig.savefig(ASSETS / "prediction-excerpt.pdf")
     plt.close(fig)
@@ -469,7 +453,7 @@ def main() -> None:
     numbers["filtering"] = evaluate_filtering(cases)
     figure_filtering(cases)
 
-    lam = tune_parameters(cases)
+    lam = DEFAULT_SPLINE_SMOOTHING
     numbers["lambda"] = lam
     numbers["prediction"] = evaluate_prediction(cases, lam)
     figure_prediction_excerpt(cases, lam)

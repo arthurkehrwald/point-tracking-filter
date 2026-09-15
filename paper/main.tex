@@ -196,7 +196,7 @@ The simplest predictor, the \emph{zero-order hold}, returns the newest sample $y
 \subsection{Windowed spline extrapolation}
 
 The spline approach of \cref{sec:filtering} is adapted to real time by fitting a smoothing spline to the samples of a 300~ms trailing window which contains about 22 samples.
-The smoothing parameter is fixed instead of being chosen by GCV\@.
+The smoothing parameter is set manually to $\lambda = 10^{-4}~\text{s}^3$ instead of being chosen by GCV\@.
 On so few samples, individual samples entering and exiting the trailing window make GCV behave erratically.
 
 \section{Evaluation}
@@ -261,13 +261,7 @@ This could potentially be solved by a rejection of outliers before smoothing.
 
 \subsection{Prediction}
 
-The smoothing parameter $\lambda$ of the windowed spline ($W = 300$~ms) is tuned once for all seven recordings at $h = 50$~ms.
-Since the image should above all be calm, the tuning minimizes the jerk ratio $\rho_i$ of recording $i$, while an RMSE above that of the zero-order hold is penalized:
-\[
-  \min \; \max_i \left( \lvert \ln \rho_i \rvert + 100 \max\!\left(0, \frac{\mathrm{RMSE}_i}{\mathrm{RMSE}_i^{\text{hold}}} - 1\right) \right).
-\]
-The maximum over the recordings prevents the slow recordings, which are in the majority, from determining the parameter alone.
-The search runs on a logarithmic grid followed by a bounded scalar minimization and yields $\lambda = 1.61 \cdot 10^{-4}~\text{s}^3$.
+The windowed spline uses the manually set $\lambda = 10^{-4}~\text{s}^3$ and $W = 300$~ms for all recordings.
 At $h = 0$, the median time between the capture of the newest available sample and the requested instant is $L = 31$~ms, consisting of the median camera latency of 25~ms and the time until the next display frame.
 
 \begin{table}[htbp]
@@ -301,11 +295,11 @@ At $h = 0$, the median time between the capture of the newest available sample a
 
 \paragraph{Slow movements}
 \Cref{tab:prediction} and \cref{fig:prediction-horizon} show that the windowed spline clearly improves on the zero-order hold for slow movements.
-The RMSE decreases by 23\% without an additional horizon (0.84 to 0.65~cm), by 50\% at $h = 50$~ms (1.61 to 0.81~cm), and by 53\% at $h = 100$~ms (2.47 to 1.15~cm).
+The RMSE decreases by 24\% without an additional horizon (0.84 to 0.64~cm), by 50\% at $h = 50$~ms (1.61 to 0.80~cm), and by 52\% at $h = 100$~ms (2.47 to 1.18~cm).
 At $h = 50$~ms, the prediction is thus more accurate than the hold without any additional latency.
-At $h = 0$, the RMSE of 0.65~cm hardly exceeds the mean offline deviation of the raw data of 0.60~cm (\cref{tab:filtering}):
+At $h = 0$, the RMSE of 0.64~cm hardly exceeds the mean offline deviation of the raw data of 0.60~cm (\cref{tab:filtering}):
 the remaining error is essentially the systematic triangulation error discussed above, which no predictor can remove.
-Its output is also almost three times calmer than that of the hold (jerk ratio 3.3 versus 9.0 at $h = 0$).
+Its output is also more than twice as calm as that of the hold (jerk ratio 3.8 versus 9.0 at $h = 0$), although at $h = 100$~ms it becomes jerkier than the hold (15.8 versus 8.9).
 The high jerk ratio of the hold does not depend on $h$ and is caused by its steps:
 since the display frames are not synchronized with the camera frames and the latency varies, some display frames repeat a sample while the next one skips a sample.
 
@@ -315,14 +309,14 @@ Since the accelerations of slow movements are small, extrapolating the spline ov
 
 \paragraph{Fast movements}
 For fast movements, the benefit is small.
-The windowed spline reduces the RMSE by 19\% at $h = 0$ (4.24 to 3.45~cm) and by 15\% at $h = 50$~ms (9.98 to 8.46~cm), and at $h = 100$~ms it is even worse than the hold (16.09 versus 15.50~cm).
+The windowed spline reduces the RMSE by 25\% at $h = 0$ (4.24 to 3.16~cm) and by 19\% at $h = 50$~ms (9.98 to 8.09~cm), and at $h = 100$~ms it is even worse than the hold (16.05 versus 15.50~cm).
 The hold approximation again matches: with an RMS speed of 121.8~cm/s, $v_{\text{rms}} L$ predicts 3.8, 9.9, and 16.0~cm, compared with the measured 4.24, 9.98, and 15.50~cm.
 Over leads of 80 to 130~ms, the accelerations of fast head movements, which change their sign within a fraction of a second, can no longer be neglected.
 \Cref{fig:prediction-excerpt} shows the result: the prediction lags during the acceleration and overshoots by several centimeters when the movement stops.
 
 The sweep in \cref{fig:prediction-sweep} shows that no choice of $\lambda$ resolves this.
 Large values of $\lambda$ turn the fit into a least squares line over the whole window, whose velocity refers to the middle of the window and thus lags by $W/2 = 150$~ms, while very small values make the output unstable (jerk ratio 31 and 121 at $\lambda = 10^{-5}$).
-The most accurate setting, $\lambda = 10^{-4}$, still leaves an RMSE of 8.1~cm for the fast recordings.
+Of the values in the sweep, the one used here, $\lambda = 10^{-4}$, is the most accurate for both movement patterns, and it still leaves an RMSE of 8.1~cm for the fast recordings.
 
 \subsection{Conclusion}
 
@@ -334,7 +328,7 @@ Outliers, on the other hand, are only spread out by the spline and should be rej
 
 For slow movements, as they occur in front of a screen, real-time prediction is effective:
 it halves the error at horizons of 50 to 100~ms and brings it close to the error floor.
-For fast movements, the prediction is not effective, with an RMSE of 8.5~cm at $h = 50$~ms and an improvement of at most 15\% over not predicting at all at that horizon.
+For fast movements, the prediction is not effective, with an RMSE of 8.1~cm at $h = 50$~ms and an improvement of only 19\% over not predicting at all at that horizon.
 Even in the best case, the accuracy remains far from the few millimeters required by the parallax barrier display of \cref{sec:background}.
 Since the prediction error grows with the lead, the most promising improvement is reducing the latency of the tracking system itself.
 
