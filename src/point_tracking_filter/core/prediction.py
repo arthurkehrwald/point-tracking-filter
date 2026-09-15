@@ -110,81 +110,6 @@ class ZeroOrderHold(Predictor):
         return self._xyz.copy()
 
 
-class ConstantVelocityKalman(Predictor):
-    """Recursive constant-velocity estimator with white acceleration noise.
-
-    The three axes share their dynamics and their measurement noise, so a
-    single covariance describes all of them and only the state is per-axis.
-    Propagation uses the elapsed time rather than a sample count, so a
-    dropped frame simply integrates for longer.
-
-    ``sigma_a`` is the acceleration noise density and sets the whole
-    lag-versus-jitter tradeoff; ``sigma_m`` is the measurement noise, about
-    0.1 cm on these recordings.
-    """
-
-    name: ClassVar[str] = "Constant-velocity Kalman"
-
-    def __init__(
-        self,
-        sigma_a: float = 200.0,
-        sigma_m: float = 0.1,
-        use_confidence_weights: bool = False,
-    ) -> None:
-        if sigma_a <= 0:
-            raise PredictionError(f"sigma_a must be positive, got {sigma_a}")
-        if sigma_m <= 0:
-            raise PredictionError(f"sigma_m must be positive, got {sigma_m}")
-        self.sigma_a = float(sigma_a)
-        self.sigma_m = float(sigma_m)
-        self.use_confidence_weights = use_confidence_weights
-        self.reset()
-
-    def reset(self) -> None:
-        self._state = np.zeros((3, 2))
-        self._covariance = np.zeros((2, 2))
-        self._t: float | None = None
-
-    def _propagate(self, dt: float) -> tuple[np.ndarray, np.ndarray]:
-        transition = np.array([[1.0, dt], [0.0, 1.0]])
-        noise = self.sigma_a**2 * np.array(
-            [[dt**3 / 3.0, dt**2 / 2.0], [dt**2 / 2.0, dt]]
-        )
-        state = self._state @ transition.T
-        covariance = transition @ self._covariance @ transition.T + noise
-        return state, covariance
-
-    def update(self, t: float, xyz: np.ndarray, confidence: float | None = None) -> None:
-        measurement = np.asarray(xyz, dtype=float).reshape(3)
-        if self._t is None:
-            self._state = np.column_stack([measurement, np.zeros(3)])
-            # The velocity is entirely unknown until a second sample arrives.
-            self._covariance = np.diag([self.sigma_m**2, 1e6])
-            self._t = float(t)
-            return
-
-        dt = float(t) - self._t
-        if dt > 0:
-            self._state, self._covariance = self._propagate(dt)
-            self._t = float(t)
-
-        sigma_m = self.sigma_m
-        if self.use_confidence_weights and confidence is not None:
-            sigma_m = sigma_m / max(float(confidence), 1e-3)
-
-        innovation = measurement - self._state[:, 0]
-        innovation_covariance = self._covariance[0, 0] + sigma_m**2
-        gain = self._covariance[:, 0] / innovation_covariance
-        self._state = self._state + np.outer(innovation, gain)
-        self._covariance = self._covariance - np.outer(gain, self._covariance[0, :])
-
-    def predict(self, t_target: float) -> np.ndarray:
-        if self._t is None:
-            return np.full(3, np.nan)
-        dt = float(t_target) - self._t
-        return self._state[:, 0] + self._state[:, 1] * dt
-
-
 class _TrailingWindow(Predictor):
     """Shared bookkeeping for predictors that refit a trailing window."""
 
@@ -295,41 +220,6 @@ class WindowedSplineRefit(_TrailingWindow):
         except (ValueError, np.linalg.LinAlgError):
             # A degenerate window must not abort the run; hold instead.
             return values[-1].copy()
-
-
-def estimate_noise(track: Track) -> tuple[float, float]:
-    """Seed values for ``sigma_m`` and ``sigma_a``, measured off a recording.
-
-    The measurement scale is the spread of the raw samples around the
-    offline fit. The acceleration noise density follows from the velocity
-    increments of that fit, since the constant-velocity model treats them as
-    white: ``var(dv) = sigma_a^2 * dt``. Both are starting points for
-    :func:`tune`, not final values -- the offline fit suppresses some of the
-    very motion the second estimate is trying to measure.
-    """
-    from .filtering import SplineParams, apply_spline_filter
-
-    smoothed = apply_spline_filter(track, SplineParams(auto_smoothing=True))
-    residual = (track.xyz - smoothed.xyz)[track.valid_mask]
-    if residual.size == 0:
-        raise PredictionError(f"{track.name}: nothing to estimate noise from")
-    sigma_m = float(np.sqrt(np.nanmean(residual**2)))
-
-    increments: list[np.ndarray] = []
-    steps: list[np.ndarray] = []
-    for indices in smoothed.segments():
-        if indices.size < 4:
-            continue
-        times = smoothed.t[indices]
-        velocity = np.diff(smoothed.xyz[indices], axis=0) / np.diff(times)[:, None]
-        increments.append(np.diff(velocity, axis=0))
-        steps.append(np.diff(times)[1:])
-    if not increments:
-        return sigma_m, 1.0
-    stacked = np.vstack(increments)
-    dt = float(np.median(np.concatenate(steps)))
-    sigma_a = float(np.sqrt(np.mean(stacked**2) / dt))
-    return sigma_m, max(sigma_a, 1e-6)
 
 
 def sample_latency(track: Track, camera_latency: float | None = None) -> np.ndarray:
@@ -497,7 +387,7 @@ class Score:
 
         Averaging lets whichever regime happens to be over-represented in
         the tuning set drag the parameter towards itself: with three slow
-        recordings against two fast ones, the mean picks a process noise
+        recordings against two fast ones, the mean picks a parameter
         that then fails on held-out fast motion. The deployed filter has to
         work in every regime, so it is tuned against its hardest case.
         """

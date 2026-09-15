@@ -24,15 +24,12 @@ from PySide6.QtWidgets import (
 from ..core.analysis import AnalysisError
 from ..core.model import Track
 from ..core.prediction import (
-    ConstantVelocityKalman,
     PredictionError,
     StreamConfig,
     WindowedSplineRefit,
     ZeroOrderHold,
-    estimate_noise,
     oracle,
     simulate,
-    tune,
 )
 
 ORACLE_LABEL = "Offline bound (non-causal)"
@@ -63,11 +60,8 @@ class PredictionPanel(QWidget):
 
         self.hold_box = QCheckBox("Hold (no prediction)")
         self.hold_box.setChecked(True)
-        self.fixed_box = QCheckBox("Kalman, fixed")
-        self.fixed_box.setChecked(True)
         self.spline_box = QCheckBox("Windowed spline refit")
-
-        self.sigma_a_spin = self._noise_spin(7.0, "Process noise of the fixed filter.")
+        self.spline_box.setChecked(True)
 
         self.spline_window_spin = QDoubleSpinBox()
         self.spline_window_spin.setRange(10.0, 2000.0)
@@ -86,12 +80,6 @@ class PredictionPanel(QWidget):
         show_button = QPushButton("Show in player")
         show_button.clicked.connect(self.show_in_player)
 
-        tune_button = QPushButton("Tune on this recording")
-        tune_button.clicked.connect(self.tune_selected)
-
-        estimate_button = QPushButton("Estimate noise from recording")
-        estimate_button.clicked.connect(self.estimate_from_recording)
-
         self.status = QLabel("No prediction yet.")
         self.status.setWordWrap(True)
 
@@ -103,7 +91,6 @@ class PredictionPanel(QWidget):
         variants = QGroupBox("Variants")
         variant_layout = QFormLayout(variants)
         variant_layout.addRow(self.hold_box)
-        variant_layout.addRow(self.fixed_box, self.sigma_a_spin)
         variant_layout.addRow(self.spline_box, self.spline_window_spin)
         variant_layout.addRow("  smoothing", self.spline_smoothing_spin)
 
@@ -111,19 +98,8 @@ class PredictionPanel(QWidget):
         layout.addLayout(form)
         layout.addWidget(variants)
         layout.addWidget(show_button)
-        layout.addWidget(tune_button)
-        layout.addWidget(estimate_button)
         layout.addWidget(self.status)
         layout.addStretch(1)
-
-    @staticmethod
-    def _noise_spin(value: float, tip: str) -> QDoubleSpinBox:
-        spin = QDoubleSpinBox()
-        spin.setDecimals(2)
-        spin.setRange(0.01, 10000.0)
-        spin.setValue(value)
-        spin.setToolTip(tip)
-        return spin
 
     def refresh(self, tracks: dict[str, Track] | None = None) -> None:
         if tracks is not None:
@@ -176,16 +152,9 @@ class PredictionPanel(QWidget):
 
     def predictors(self) -> list:
         """The variants currently ticked, in table order."""
-        sigma_m = 0.1
         chosen: list = []
         if self.hold_box.isChecked():
             chosen.append(ZeroOrderHold())
-        if self.fixed_box.isChecked():
-            chosen.append(
-                ConstantVelocityKalman(
-                    sigma_a=self.sigma_a_spin.value(), sigma_m=sigma_m
-                )
-            )
         if self.spline_box.isChecked():
             chosen.append(
                 WindowedSplineRefit(
@@ -226,54 +195,4 @@ class PredictionPanel(QWidget):
         self.status.setText(
             "Shown in the player. Use the Analysis panel's track comparison "
             "to score these, and the reference, against a ground truth."
-        )
-
-    def tune_selected(self) -> None:
-        """Fit the process noise of the fixed Kalman variant."""
-        track = self._source_track()
-        if track is None:
-            self.status.setText("Load a recording to tune on first.")
-            return
-        if not self.fixed_box.isChecked():
-            self.status.setText("Tick the Kalman variant to tune.")
-            return
-
-        config = self.config()
-        try:
-            reference = self._reference(track, config)
-            result = tune(
-                [track],
-                lambda value: ConstantVelocityKalman(sigma_a=value),
-                (0.5, 300.0),
-                config,
-                [reference],
-                steps=8,
-            )
-            self.sigma_a_spin.setValue(result.value)
-            label = f"fixed process noise {result.value:.2f}"
-        except (PredictionError, AnalysisError, ValueError) as error:
-            self.status.setText(str(error))
-            return
-
-        self.status.setText(
-            f"Tuned {label} on {track.name} alone, so treat it as a starting "
-            f"point rather than a setting that will hold across recordings."
-        )
-
-    def estimate_from_recording(self) -> None:
-        track = self._source_track()
-        if track is None:
-            self.status.setText("Load a recording to measure first.")
-            return
-        try:
-            sigma_m, sigma_a = estimate_noise(track)
-        except (PredictionError, ValueError) as error:
-            self.status.setText(str(error))
-            return
-
-        self.sigma_a_spin.setValue(min(max(sigma_a, 0.01), 10000.0))
-        self.status.setText(
-            f"Measured {sigma_m:.3f} cm of measurement noise and an acceleration "
-            f"scale of {sigma_a:.1f} on {track.name}. These are seeds for tuning, "
-            f"not tuned values."
         )

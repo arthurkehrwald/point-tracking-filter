@@ -82,16 +82,9 @@ cannot see this, so predictions are also scored on smoothness relative to the of
 - **High-frequency ratio** — output power above 8 Hz, where real hand motion has little to say.
 
 Predictors are causal by construction and the replay harness enforces it: each one only ever sees samples that had
-arrived by the time it was asked. Available variants are a zero-order hold (the cost of not predicting), a
-constant-velocity Kalman filter, and a speed-scheduled variant whose process noise follows a heavily smoothed speed
-estimate — no single fixed setting suits both regimes, since jitter is worst when the target is nearly still and lag is
-worst when it moves. Either can additionally damp only the extrapolated part of the output, which buys smoothness more
-cheaply than filtering the position would, and fades towards a hold when samples go stale.
+arrived by the time it was asked. Available variants are a zero-order hold (the cost of not predicting) and a windowed
+spline refit, which fits a smoothing spline to a trailing window of samples on every frame and extrapolates it to the
+target time.
 
 Parameters are fitted against the worst recording rather than the average, because averaging lets whichever regime is
-over-represented in the tuning set pick a value that then fails elsewhere. On four held-out recordings every variant
-beats not predicting at all on both accuracy and smoothness; the fixed filter gives the lowest worst-case cost while
-the scheduled one is more accurate but moves more per frame.
-
-Note that a cubic smoothing spline is the two-sided form of the same constant-velocity model, so the offline `gcv`
-filter and the Kalman filter here are the same estimator with and without access to the future.
+over-represented in the tuning set pick a value that then fails elsewhere.

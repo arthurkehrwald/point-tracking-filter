@@ -7,14 +7,12 @@ from point_tracking_filter.core.analysis import AnalysisError, smoothness_stats
 from point_tracking_filter.core.model import Track
 from point_tracking_filter.core.prediction import (
     DEFAULT_CAMERA_LATENCY,
-    ConstantVelocityKalman,
     PredictionError,
     Score,
     StreamConfig,
     WindowedSplineRefit,
     ZeroOrderHold,
     compare,
-    estimate_noise,
     holding_rmse,
     oracle,
     output_times,
@@ -29,7 +27,6 @@ from point_tracking_filter.core.prediction import (
 def _every_predictor() -> list:
     return [
         ZeroOrderHold(),
-        ConstantVelocityKalman(),
         WindowedSplineRefit(backend="gcv"),
         WindowedSplineRefit(backend="parametric"),
     ]
@@ -65,11 +62,11 @@ def test_prediction_never_looks_ahead():
         horizon=0.05, camera_latency=DEFAULT_CAMERA_LATENCY, output_hz=RATE
     )
 
-    full = simulate(track, ConstantVelocityKalman(), config)
+    full = simulate(track, WindowedSplineRefit(), config)
     half = len(track) // 2
     truncated = simulate(
         Track(t=track.t[:half], xyz=track.xyz[:half], name="cut", source="oak-d"),
-        ConstantVelocityKalman(),
+        WindowedSplineRefit(),
         config,
     )
 
@@ -251,22 +248,6 @@ def test_constant_velocity_is_recovered_by_every_family(predictor):
     assert np.max(np.abs(settled)) < 1e-6
 
 
-def test_kalman_process_noise_trades_lag_against_jitter():
-    rng = np.random.default_rng(5)
-    track = _wobble(n=600)
-    track.xyz = track.xyz + rng.normal(scale=0.1, size=track.xyz.shape)
-    config = StreamConfig(horizon=0.05, camera_latency=0.025, output_hz=RATE)
-    reference = oracle(track, config)
-
-    calm = smoothness_stats(
-        simulate(track, ConstantVelocityKalman(sigma_a=20.0), config), reference
-    )
-    twitchy = smoothness_stats(
-        simulate(track, ConstantVelocityKalman(sigma_a=5000.0), config), reference
-    )
-    assert calm.jerk_ratio < twitchy.jerk_ratio
-
-
 def test_spline_refit_records_its_knot_choices():
     rng = np.random.default_rng(7)
     track = _wobble(n=300)
@@ -282,10 +263,10 @@ def test_spline_refit_records_its_knot_choices():
 
 
 def test_predictor_arguments_are_validated():
-    with pytest.raises(PredictionError, match="sigma_a"):
-        ConstantVelocityKalman(sigma_a=0.0)
-    with pytest.raises(PredictionError, match="sigma_m"):
-        ConstantVelocityKalman(sigma_m=-1.0)
+    with pytest.raises(PredictionError, match="window_seconds"):
+        WindowedSplineRefit(window_seconds=0.0)
+    with pytest.raises(PredictionError, match="smoothing"):
+        WindowedSplineRefit(smoothing=-1.0)
     with pytest.raises(PredictionError, match="backend"):
         WindowedSplineRefit(backend="nope")
 
@@ -293,10 +274,10 @@ def test_predictor_arguments_are_validated():
 def test_compare_reports_every_pairing():
     track = _wobble(n=200)
     config = StreamConfig(horizon=0.05, camera_latency=0.025, output_hz=RATE)
-    predictors = [ZeroOrderHold(), ConstantVelocityKalman(), WindowedSplineRefit()]
+    predictors = [ZeroOrderHold(), WindowedSplineRefit()]
 
     rows = compare([track], predictors, config)
-    assert len(rows) == 3
+    assert len(rows) == 2
     assert {row["predictor"] for row in rows} == {p.name for p in predictors}
     for row in rows:
         assert np.isfinite(row["rmse"])
@@ -309,17 +290,6 @@ def _noisy_wobble(n: int = 600, scale: float = 0.1, seed: int = 3) -> Track:
     track = _wobble(n=n)
     track.xyz = track.xyz + rng.normal(scale=scale, size=track.xyz.shape)
     return track
-
-
-def test_estimate_noise_recovers_the_measurement_scale():
-    clean = _wobble(n=800)
-    noisy = clean.copy()
-    rng = np.random.default_rng(2)
-    noisy.xyz = clean.xyz + rng.normal(scale=0.2, size=clean.xyz.shape)
-
-    sigma_m, sigma_a = estimate_noise(noisy)
-    assert sigma_m == pytest.approx(0.2, rel=0.35)
-    assert sigma_a > 0
 
 
 def test_cost_is_driven_by_the_worst_recording():
@@ -344,17 +314,18 @@ def test_tuning_improves_on_a_bad_starting_point():
 
     result = tune(
         tracks,
-        lambda value: ConstantVelocityKalman(sigma_a=value),
-        (1.0, 3000.0),
+        lambda value: WindowedSplineRefit(smoothing=value),
+        (1e-6, 10.0),
         config,
         references,
         steps=6,
     )
+    # A vanishing penalty extrapolates the noise of the newest samples.
     awful = score(
-        tracks, ConstantVelocityKalman(sigma_a=3000.0), config, references, baselines
+        tracks, WindowedSplineRefit(smoothing=1e-6), config, references, baselines
     )
     assert result.score.cost < awful.cost
-    assert 1.0 <= result.value <= 3000.0
+    assert 1e-6 <= result.value <= 10.0
     assert result.evaluated > 1
 
 

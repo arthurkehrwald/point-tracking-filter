@@ -31,7 +31,6 @@ from point_tracking_filter.core.io.oak_d import load_oak_d
 from point_tracking_filter.core.io.optitrack import load_optitrack
 from point_tracking_filter.core.model import Track
 from point_tracking_filter.core.prediction import (
-    ConstantVelocityKalman,
     StreamConfig,
     WindowedSplineRefit,
     ZeroOrderHold,
@@ -53,7 +52,6 @@ HORIZONS = [0.0, 0.05, 0.1]
 CURVE_HORIZONS = [0.0, 0.025, 0.05, 0.075, 0.1]
 TUNING_HORIZON = 0.05
 SPLINE_WINDOW = 0.3
-SIGMA_M = 0.1
 
 plt.rcParams.update(
     {
@@ -69,7 +67,6 @@ COLORS = {
     "raw": "#9ecae1",
     "gcv": "#08519c",
     "hold": "#999999",
-    "kalman": "#d95f02",
     "spline": "#1b9e77",
 }
 
@@ -265,10 +262,9 @@ def busiest_window(track: Track, span: float) -> float:
 # --------------------------------------------------------------- prediction
 
 
-def predictors(sigma_a: float, lam: float) -> dict:
+def predictors(lam: float) -> dict:
     return {
         "hold": lambda: ZeroOrderHold(),
-        "kalman": lambda: ConstantVelocityKalman(sigma_a=sigma_a, sigma_m=SIGMA_M),
         "spline": lambda: WindowedSplineRefit(window_seconds=SPLINE_WINDOW, smoothing=lam),
     }
 
@@ -286,18 +282,10 @@ def run(case: Case, predictor, horizon: float) -> dict:
     }
 
 
-def tune_parameters(cases: list[Case]) -> tuple[float, float]:
+def tune_parameters(cases: list[Case]) -> float:
     tracks = [c.raw for c in cases]
     truths = [c.truth for c in cases]
     config = StreamConfig(horizon=TUNING_HORIZON)
-    kalman = tune(
-        tracks,
-        lambda v: ConstantVelocityKalman(sigma_a=v, sigma_m=SIGMA_M),
-        (0.5, 1000.0),
-        config,
-        truths,
-        steps=10,
-    )
     spline = tune(
         tracks,
         lambda v: WindowedSplineRefit(window_seconds=SPLINE_WINDOW, smoothing=v),
@@ -306,24 +294,23 @@ def tune_parameters(cases: list[Case]) -> tuple[float, float]:
         truths,
         steps=8,
     )
-    print(f"tuned sigma_a = {kalman.value:.3g}, costs {np.round(kalman.score.costs, 2)}")
-    print(f"tuned lambda  = {spline.value:.3g}, costs {np.round(spline.score.costs, 2)}")
-    return kalman.value, spline.value
+    print(f"tuned lambda = {spline.value:.3g}, costs {np.round(spline.score.costs, 2)}")
+    return spline.value
 
 
 def regime_mean(results: dict, cases: list[Case], regime: str, key: str) -> float:
     return float(np.mean([results[c.token][key] for c in cases if c.regime == regime]))
 
 
-def evaluate_prediction(cases: list[Case], sigma_a: float, lam: float) -> dict:
-    factories = predictors(sigma_a, lam)
+def evaluate_prediction(cases: list[Case], lam: float) -> dict:
+    factories = predictors(lam)
     results: dict = {}
     for horizon in sorted(set(HORIZONS) | set(CURVE_HORIZONS)):
         for name, factory in factories.items():
             per_case = {c.token: run(c, factory(), horizon) for c in cases}
             results[f"{name}@{horizon * 1000:.0f}"] = per_case
 
-    labels = {"hold": "Hold", "kalman": "Kalman", "spline": "Spline refit"}
+    labels = {"hold": "Hold", "spline": "Spline refit"}
     rows = []
     for regime in ["slow", "fast"]:
         if rows:
@@ -372,7 +359,6 @@ def evaluate_prediction(cases: list[Case], sigma_a: float, lam: float) -> dict:
 def sweep(cases: list[Case]) -> dict:
     config_h = TUNING_HORIZON
     grids = {
-        "kalman": (np.logspace(np.log10(0.5), 3, 9), lambda v: ConstantVelocityKalman(sigma_a=v, sigma_m=SIGMA_M)),
         "spline": (np.logspace(-5, 1, 7), lambda v: WindowedSplineRefit(window_seconds=SPLINE_WINDOW, smoothing=v)),
     }
     out: dict = {}
@@ -396,7 +382,7 @@ def sweep(cases: list[Case]) -> dict:
                 )
             out[f"{name}/{regime}"] = points
             xs, ys = [p[1] for p in points], [p[2] for p in points]
-            ax.plot(xs, ys, "o-", ms=3, color=COLORS[name], label={"kalman": "Kalman ($\\sigma_a$)", "spline": "Spline refit ($\\lambda$)"}[name])
+            ax.plot(xs, ys, "o-", ms=3, color=COLORS[name], label="Spline refit ($\\lambda$)")
             for index in (0, len(points) - 1):
                 ax.annotate(
                     f"{points[index][0]:.2g}",
@@ -417,32 +403,22 @@ def sweep(cases: list[Case]) -> dict:
     return out
 
 
-def figure_prediction_excerpt(cases: list[Case], sigma_a: float, lam: float) -> None:
+def figure_prediction_excerpt(cases: list[Case], lam: float) -> None:
     case = next(c for c in cases if c.token == "fast3")
     span = 1.0
     start = busiest_window(case.truth, span)
     fig, ax = plt.subplots(figsize=(6.0, 2.2), constrained_layout=True)
     mask = (case.truth.t >= start) & (case.truth.t <= start + span)
     ax.plot(case.truth.t[mask] - start, case.truth.xyz[mask, 2], color=COLORS["truth"], lw=1.2, label="OptiTrack")
-    labels = {"hold": "Hold", "kalman": "Kalman", "spline": "Spline refit"}
-    for name, factory in predictors(sigma_a, lam).items():
+    labels = {"hold": "Hold", "spline": "Spline refit"}
+    for name, factory in predictors(lam).items():
         predicted = simulate(case.raw, factory(), StreamConfig(horizon=TUNING_HORIZON))
         mask = (predicted.t >= start) & (predicted.t <= start + span)
-        # Kalman and spline refit nearly coincide: the Kalman line is drawn wide
-        # underneath and the spline thin and dashed on top, so both stay visible.
-        ax.plot(
-            predicted.t[mask] - start,
-            predicted.xyz[mask, 2],
-            "--" if name == "spline" else "-",
-            color=COLORS[name],
-            lw={"kalman": 3.0, "spline": 1.0}.get(name, 1.0),
-            zorder={"kalman": 2, "spline": 3}.get(name, 1),
-            label=labels[name],
-        )
+        ax.plot(predicted.t[mask] - start, predicted.xyz[mask, 2], color=COLORS[name], lw=1.0, label=labels[name])
     ax.set_xlabel("target time [s]")
     ax.set_ylabel("$z$ [cm]")
     ax.set_title(f"{case.token}: depth predicted {TUNING_HORIZON * 1000:.0f} ms ahead")
-    ax.legend(frameon=False, ncol=4)
+    ax.legend(frameon=False, ncol=3)
     fig.savefig(ASSETS / "prediction-excerpt.pdf")
     plt.close(fig)
 
@@ -493,10 +469,10 @@ def main() -> None:
     numbers["filtering"] = evaluate_filtering(cases)
     figure_filtering(cases)
 
-    sigma_a, lam = tune_parameters(cases)
-    numbers["sigma_a"], numbers["lambda"] = sigma_a, lam
-    numbers["prediction"] = evaluate_prediction(cases, sigma_a, lam)
-    figure_prediction_excerpt(cases, sigma_a, lam)
+    lam = tune_parameters(cases)
+    numbers["lambda"] = lam
+    numbers["prediction"] = evaluate_prediction(cases, lam)
+    figure_prediction_excerpt(cases, lam)
     numbers["sweep"] = sweep(cases)
 
     (TABLES / "numbers.json").write_text(json.dumps(numbers, indent=1, default=float))

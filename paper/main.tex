@@ -199,64 +199,6 @@ The spline approach of \cref{sec:filtering} is adapted to real time by fitting a
 The smoothing parameter is fixed instead of being chosen by GCV\@.
 On so few samples, individual samples entering and exiting the trailing window make GCV behave erratically.
 
-\subsection{Constant-velocity Kalman filter}
-
-The Kalman filter \cite{kalman1960} with a constant-velocity model \cite{barshalom2001} is used for comparison.
-Its state for each coordinate is $\mathbf{x} = (p, v)^\top$.
-Between two samples with interval $\delta_j = t_j - t_{j-1}$, the state evolves as
-\[
-  \mathbf{x}_j = \mathbf{F}_j \mathbf{x}_{j-1} + \mathbf{q}_j,
-  \qquad
-  \mathbf{F}_j = \begin{pmatrix} 1 & \delta_j \\ 0 & 1 \end{pmatrix},
-  \qquad
-  \mathbf{Q}_j = \operatorname{Cov}(\mathbf{q}_j) = \sigma_a^2 \begin{pmatrix} \delta_j^3/3 & \delta_j^2/2 \\ \delta_j^2/2 & \delta_j \end{pmatrix},
-\]
-which is the exact discretization of the white-noise acceleration model from \cref{sec:spline-interpretation}.
-A sample measures the position, $y_j = \mathbf{H} \mathbf{x}_j + \varepsilon_j$ with $\mathbf{H} = (1 \;\, 0)$ and $\varepsilon_j \sim \mathcal{N}(0, \sigma_m^2)$.
-For every arriving sample, the estimate $\hat{\mathbf{x}}$ and its covariance $\mathbf{P}$ are first propagated and then corrected with the measurement:
-\begin{align*}
-  \mathbf{x}^- &= \mathbf{F}_j \hat{\mathbf{x}}_{j-1}, &
-  \mathbf{P}^- &= \mathbf{F}_j \mathbf{P}_{j-1} \mathbf{F}_j^\top + \mathbf{Q}_j, \\
-  \mathbf{k} &= \frac{\mathbf{P}^- \mathbf{H}^\top}{\mathbf{H} \mathbf{P}^- \mathbf{H}^\top + \sigma_m^2}, &
-  \hat{\mathbf{x}}_j &= \mathbf{x}^- + \mathbf{k} \, (y_j - \mathbf{H} \mathbf{x}^-), \qquad
-  \mathbf{P}_j = (\mathbf{I} - \mathbf{k} \mathbf{H}) \mathbf{P}^-.
-\end{align*}
-The prediction for a requested frame is $\hat p + \hat v L_k$.
-The filter starts with $\hat{\mathbf{x}}_1 = (y_1, 0)^\top$ and $\mathbf{P}_1 = \operatorname{diag}(\sigma_m^2, 10^6)$, i.e., with a practically unknown velocity.
-Because $\mathbf{F}_j$, $\mathbf{Q}_j$, and $\sigma_m$ are the same for all coordinates, one covariance matrix serves all three.
-The measurement noise is set to $\sigma_m = 0.1$~cm, while the process noise $\sigma_a$ determines the trade-off between noise and lag and is tuned in \cref{sec:evaluation}.
-
-The Kalman filter is closely related to the smoothing spline.
-Under the model above, the Kalman filter computes the expected state given all samples up to $t_j$, and the Rauch--Tung--Striebel smoother \cite{rauch1965} computes it given all samples of the segment.
-By \cref{eq:lambda-noise}, the latter is exactly the smoothing spline with $\lambda = \sigma_m^2 / \sigma_a^2$ \cite{wahba1978, kohn1987}.
-At the newest sample, the two coincide:
-apart from the prior on the initial state, the Kalman estimate $(\hat p, \hat v)$ equals the value and slope at the end of a smoothing spline fitted to \emph{all} past samples.
-The Kalman prediction is therefore the windowed spline extrapolation with $W \to \infty$ and without the cubic term of \cref{eq:spline-extrapolation}, and it inherits the velocity lag caused by the boundary.
-
-This lag can be quantified.
-For a constant sampling interval $\delta$ that is short compared with the time scale of the motion, the filter settles into a steady state that is well described by its continuous-time counterpart with process noise intensity $\sigma_a^2$ and measurement noise intensity $r = \sigma_m^2 \delta$.
-Solving the algebraic Riccati equation yields the constant gains $k_p = \sqrt{2} \, \omega_0$ and $k_v = \omega_0^2$ with
-\begin{equation}
-  \label{eq:omega0}
-  \omega_0 = \left( \frac{\sigma_a^2}{\sigma_m^2 \delta} \right)^{1/4} = (\lambda \delta)^{-1/4}.
-\end{equation}
-The estimation error thus obeys a second-order system with the characteristic polynomial $s^2 + \sqrt{2} \, \omega_0 s + \omega_0^2$, i.e., with natural frequency $\omega_0$ and damping $1/\sqrt{2}$.
-By \cref{eq:lambda-noise}, $\omega_0$ equals $2 \pi f_c$ of the smoothing spline in \cref{eq:transfer}, so the causal filter and the offline smoother operate on the same time scale.
-If the target moves with constant acceleration $a$, the estimation error $(e_p, e_v)$ satisfies $\dot e_p = e_v - k_p e_p$ and $\dot e_v = a - k_v e_p$ and settles at $e_p = a / \omega_0^2$ and $e_v = \sqrt{2} \, a / \omega_0$.
-Inserted into \cref{eq:prediction-error}, the prediction error becomes
-\begin{equation}
-  \label{eq:kalman-lag}
-  e(L) = \frac{a}{\omega_0^2} + \frac{\sqrt{2} \, a}{\omega_0} L + \frac{a}{2} L^2 = \frac{a}{2} \left( L + \frac{\sqrt{2}}{\omega_0} \right)^2.
-\end{equation}
-The filter behaves as if the lead were extended by $\sqrt{2} / \omega_0$.
-A larger $\sigma_a$ shortens this delay in proportion to $\sigma_a^{-1/2}$, but the steady-state standard deviation of $\hat v$, $(\sqrt{2} \, r^{1/4} \sigma_a^{3/2})^{1/2}$, grows in proportion to $\sigma_a^{3/4}$, and it is multiplied by $L$ in the prediction.
-In practice, the two methods differ in the following respects:
-\begin{itemize}
-  \item \emph{Memory.} The Kalman filter weighs past samples with an exponentially decaying weight whose time constant follows from $\sigma_a / \sigma_m$; the window discards everything older than $W$, which increases the variance of $\hat v$ if $W$ is shorter than that time constant.
-  \item \emph{Cost.} The Kalman filter needs a constant number of operations per sample, whereas the spline is fitted anew from all samples of the window for every frame.
-  \item \emph{Parameters.} $\sigma_m$ and $\sigma_a$ are physical quantities that can be estimated from recordings, and irregular sampling intervals (e.g., dropped frames) enter the model directly through $\delta_j$.
-\end{itemize}
-
 \section{Evaluation}
 \label{sec:evaluation}
 
@@ -264,10 +206,8 @@ In practice, the two methods differ in the following respects:
 
 The evaluation uses the four recordings of slow movements (\emph{slow2}--\emph{slow5}) and three of the four recordings of fast movements (\emph{fast2}--\emph{fast4}).
 The recording \emph{fast1} is excluded because its two tracks cannot be aligned.
-The two versions contain completely different movements due to user error during recording.
+The two versions contain completely different movements due to a mistake I made during recording.
 All \emph{OAK-D} tracks are mapped into the \emph{OptiTrack} frame with the transform fitted to the LED coordinates as described in \cref{sec:sync}, so that the remaining deviations are those a filter could in principle affect.
-Movement speeds (from the \emph{OptiTrack} tracks) have a median of about 5--8~cm/s and a 95th percentile of 35--49~cm/s for the slow recordings, and a median of 95--121~cm/s and a 95th percentile of 190--206~cm/s for the fast recordings.
-All scripts and generated tables are part of the project repository.
 
 Accuracy is measured by the Euclidean distance $e_k = \lVert \hat{\mathbf{y}}_k - \mathbf{y}^*(s_k) \rVert$ between an estimate $\hat{\mathbf{y}}_k$ for time $s_k$ and the \emph{OptiTrack} position $\mathbf{y}^*$ at that time, linearly interpolated between the 120~Hz samples.
 Estimates falling into gaps of the ground truth are excluded.
@@ -327,16 +267,14 @@ A robust rejection of outliers before smoothing would be the better remedy here.
 
 \subsection{Prediction}
 
-The measurement noise of the Kalman filter is fixed at $\sigma_m = 0.1$~cm, the order of magnitude of the component $\hat\sigma$ removed by the offline spline (0.07--0.24~cm on the recordings without outliers, \cref{tab:filtering}).
-The process noise $\sigma_a$ and the smoothing parameter $\lambda$ of the windowed spline ($W = 300$~ms) are each tuned once for all seven recordings at $h = 50$~ms.
+The smoothing parameter $\lambda$ of the windowed spline ($W = 300$~ms) is tuned once for all seven recordings at $h = 50$~ms.
 Since the image should above all be calm, the tuning minimizes the jerk ratio $\rho_i$ of recording $i$, while an RMSE above that of the zero-order hold is penalized:
 \[
   \min \; \max_i \left( \lvert \ln \rho_i \rvert + 100 \max\!\left(0, \frac{\mathrm{RMSE}_i}{\mathrm{RMSE}_i^{\text{hold}}} - 1\right) \right).
 \]
 The maximum over the recordings prevents the slow recordings, which are in the majority, from determining the parameter alone.
-The search runs on a logarithmic grid followed by a bounded scalar minimization and yields $\sigma_a = 6.37~\text{cm/s}^{3/2}$ and $\lambda = 1.61 \cdot 10^{-4}~\text{s}^3$.
-Although the two parameters were tuned independently, they agree well with \cref{eq:lambda-noise}, which predicts $\lambda = \sigma_m^2 / \sigma_a^2 = 2.46 \cdot 10^{-4}~\text{s}^3$; the corresponding natural frequencies \cref{eq:omega0} are $\omega_0 = 23.5$ and $26.1$~rad/s.
-The median lead \cref{eq:lead} at $h = 0$ is $L = 31$~ms, consisting of the median camera latency of 25~ms and the time until the next display frame.
+The search runs on a logarithmic grid followed by a bounded scalar minimization and yields $\lambda = 1.61 \cdot 10^{-4}~\text{s}^3$.
+At $h = 0$, the median time between the capture of the newest available sample and the requested instant is $L = 31$~ms, consisting of the median camera latency of 25~ms and the time until the next display frame.
 
 \begin{table}[htbp]
   \centering
@@ -356,50 +294,41 @@ The median lead \cref{eq:lead} at $h = 0$ is $L = 31$~ms, consisting of the medi
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{assets/prediction-sweep.pdf}
-  \caption{Trade-off between accuracy and smoothness at $h = 50$~ms when varying $\sigma_a$ of the Kalman filter ($0.5$ to $1000$) and $\lambda$ of the windowed spline ($10^{-5}$ to $10$). The labels mark the ends of each sweep.}
+  \caption{Trade-off between accuracy and smoothness at $h = 50$~ms when varying $\lambda$ of the windowed spline ($10^{-5}$ to $10$). The labels mark the ends of the sweep.}
   \label{fig:prediction-sweep}
 \end{figure}
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{assets/prediction-excerpt.pdf}
-  \caption{Depth predicted 50~ms ahead during a fast movement. The hold lags behind by the entire lead and shows steps; both predictors lag during the acceleration and overshoot when the movement stops. The Kalman filter (wide line) and the windowed spline (dashed) nearly coincide.}
+  \caption{Depth predicted 50~ms ahead during a fast movement. The hold lags behind by the entire lead and shows steps; the windowed spline lags during the acceleration and overshoots when the movement stops.}
   \label{fig:prediction-excerpt}
 \end{figure}
 
 \paragraph{Slow movements}
-\Cref{tab:prediction} and \cref{fig:prediction-horizon} show that both predictors clearly improve on the zero-order hold for slow movements.
-The RMSE decreases by 23\% without an additional horizon (0.84 to 0.65~cm), by 50\% at $h = 50$~ms (1.61 to 0.80~cm), and by 57\% at $h = 100$~ms (2.47 to 1.07~cm).
+\Cref{tab:prediction} and \cref{fig:prediction-horizon} show that the windowed spline clearly improves on the zero-order hold for slow movements.
+The RMSE decreases by 23\% without an additional horizon (0.84 to 0.65~cm), by 50\% at $h = 50$~ms (1.61 to 0.81~cm), and by 53\% at $h = 100$~ms (2.47 to 1.15~cm).
 At $h = 50$~ms, the prediction is thus more accurate than the hold without any additional latency.
 At $h = 0$, the RMSE of 0.65~cm hardly exceeds the mean offline deviation of the raw data of 0.60~cm (\cref{tab:filtering}):
 the remaining error is essentially the systematic triangulation error discussed above, which no predictor can remove.
-The output of both predictors is also three times calmer than that of the hold (jerk ratio 3.1 versus 9.0 at $h = 0$).
+Its output is also almost three times calmer than that of the hold (jerk ratio 3.3 versus 9.0 at $h = 0$).
 The high jerk ratio of the hold does not depend on $h$ and is caused by its steps:
 since the display frames are not synchronized with the camera frames and the latency varies, some display frames repeat a sample while the next one skips a sample.
 
 The error of the hold follows the approximation $\mathbf{v} L$ from \cref{sec:real-time}.
 With the RMS speed of the slow recordings of 17.9~cm/s, the median lead $L = h + 31$~ms, and the error floor $b = 0.60$~cm combined in quadrature, $(b^2 + v_{\text{rms}}^2 L^2)^{1/2}$ predicts 0.82, 1.57, and 2.42~cm for the three horizons, compared with the measured 0.84, 1.61, and 2.47~cm.
-With the tuned $\sigma_a$, the delay in \cref{eq:kalman-lag} is $\sqrt{2} / \omega_0 = 60$~ms.
-Since the accelerations of slow movements are small, the quadratic error remains of the order of the error floor, which explains why prediction almost halves the error here.
+Since the accelerations of slow movements are small, extrapolating the spline over this lead remains accurate, which explains why prediction halves the error here.
 
 \paragraph{Fast movements}
 For fast movements, the benefit is small.
-The Kalman filter reduces the RMSE by 11\% at $h = 0$, by 15\% at $h = 50$~ms (9.98 to 8.51~cm), and by only 5\% at $h = 100$~ms, where the windowed spline is even worse than the hold (16.09 versus 15.50~cm).
+The windowed spline reduces the RMSE by 19\% at $h = 0$ (4.24 to 3.45~cm) and by 15\% at $h = 50$~ms (9.98 to 8.46~cm), and at $h = 100$~ms it is even worse than the hold (16.09 versus 15.50~cm).
 The hold approximation again matches: with an RMS speed of 121.8~cm/s, $v_{\text{rms}} L$ predicts 3.8, 9.9, and 16.0~cm, compared with the measured 4.24, 9.98, and 15.50~cm.
-For the predictors, \cref{eq:kalman-lag} with the RMS acceleration of 1022~cm/s$^2$ gives 4.2, 10.2, and 18.6~cm, compared with the measured 3.77, 8.51, and 14.77~cm.
-The approximation overestimates the error because it assumes a constant acceleration, whereas the acceleration of a head movement changes its sign within a fraction of a second.
-Nevertheless, it explains the essential effect:
-the filter's own delay of 60~ms is more than twice the camera latency, so the extrapolation effectively bridges 90 to 190~ms, and over such leads the unmodelled acceleration dominates.
-\Cref{fig:prediction-excerpt} shows the result: the predictions lag during the acceleration and overshoot by several centimeters when the movement stops.
+Over leads of 80 to 130~ms, the accelerations of fast head movements, which change their sign within a fraction of a second, can no longer be neglected.
+\Cref{fig:prediction-excerpt} shows the result: the prediction lags during the acceleration and overshoots by several centimeters when the movement stops.
 
-The sweep in \cref{fig:prediction-sweep} shows that this is a consequence of the tuning rather than of the method.
-With $\sigma_a = 57.8$, the delay shrinks to 20~ms and the RMSE of the fast recordings drops to 6.2~cm, 38\% below the hold, but their jerk ratio rises from 33 to 97, and the slow recordings become markedly less calm (jerk ratio 28 instead of 5).
-This is the conflict from \cref{eq:kalman-lag}: shortening the delay requires a larger $\sigma_a$, which amplifies the noise in $\hat v$.
-No single parameter serves both movement patterns.
-For the windowed spline, large values of $\lambda$ turn the fit into a least squares line over the whole window, whose velocity refers to the middle of the window and thus lags by $W/2 = 150$~ms, while very small values make the output unstable (jerk ratio 31 and 121 at $\lambda = 10^{-5}$).
-
-The windowed spline and the Kalman filter perform almost identically up to $h = 50$~ms, as expected from their equivalence.
-Only at $h = 100$~ms does the spline fall behind (16.09 versus 14.77~cm, jerk ratio 61.7 versus 45.0), which is consistent with the cubic term of \cref{eq:spline-extrapolation}, whose contribution grows with $L^3$.
+The sweep in \cref{fig:prediction-sweep} shows that no choice of $\lambda$ resolves this.
+Large values of $\lambda$ turn the fit into a least squares line over the whole window, whose velocity refers to the middle of the window and thus lags by $W/2 = 150$~ms, while very small values make the output unstable (jerk ratio 31 and 121 at $\lambda = 10^{-5}$).
+The most accurate setting, $\lambda = 10^{-4}$, still leaves an RMSE of 8.1~cm for the fast recordings.
 
 \subsection{Conclusion}
 
@@ -411,12 +340,9 @@ Outliers, on the other hand, are only spread out by the spline and should be rej
 
 For slow movements, as they occur in front of a screen, real-time prediction is effective:
 it halves the error at horizons of 50 to 100~ms and brings it close to the error floor.
-For fast movements, neither predictor is effective, with an RMSE of 8.5~cm at $h = 50$~ms and an improvement of at most 15\% over not predicting at all.
+For fast movements, the prediction is not effective, with an RMSE of 8.5~cm at $h = 50$~ms and an improvement of at most 15\% over not predicting at all at that horizon.
 Even in the best case, the accuracy remains far from the few millimeters required by the parallax barrier display of \cref{sec:background}.
-
-The windowed spline extrapolation offers no advantage over the Kalman filter.
-Both are the same estimator, differing only in the finite window and the cubic extrapolation term, which degrades the spline at long leads; in addition, the spline has to be refitted for every frame.
-Since the prediction error grows quadratically with the effective lead, the most promising improvements are reducing the latency of the tracking system itself and adapting the process noise to the movement, for example by switching between several motion models \cite{barshalom2001}.
+Since the prediction error grows with the lead, the most promising improvement is reducing the latency of the tracking system itself.
 
 \bibliographystyle{siamplain}
 \bibliography{references}

@@ -192,7 +192,7 @@ def test_prediction_panel_shows_variants_side_by_side(window):
     assert oak.led.name in names
     predicted = [name for name in names if "+50 ms" in name]
     assert len(predicted) == 2
-    assert any("Constant-velocity" in name for name in predicted)
+    assert any("Windowed spline" in name for name in predicted)
 
     # The offline bound used as the default reference is added too, so the
     # Analysis panel's track comparison can score the variants against it.
@@ -208,23 +208,6 @@ def test_prediction_panel_shows_variants_side_by_side(window):
     analysis.compare_tracks()
     assert analysis.comparison_table.rowCount() > 0
     assert analysis.comparison_table.columnCount() == analysis.compare_list.count() + 1
-
-
-def test_prediction_panel_estimates_and_tunes(window):
-    oak = window.store.load(next(OAK_D_DIR.glob("slow2*.csv")))
-    window.player.add_track(oak.led)
-    window.refresh_panels()
-
-    panel = window.prediction_panel
-    panel.source_box.setCurrentIndex(panel.source_box.findData(oak.led.name))
-
-    panel.estimate_from_recording()
-    assert "measurement noise" in panel.status.text()
-    assert panel.sigma_a_spin.value() > 0
-
-    panel.tune_selected()
-    assert "Tuned fixed process noise" in panel.status.text()
-    assert 0.5 <= panel.sigma_a_spin.value() <= 300.0
 
 
 def test_prediction_panel_reports_missing_input(window):
