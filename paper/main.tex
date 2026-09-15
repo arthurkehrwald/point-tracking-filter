@@ -68,7 +68,7 @@ With the recording function, which is also new, the coordinates of the LED toget
 \end{figure}
 
 The signal processing is to be designed and tested on the basis of authentic motion capture data.
-The recording takes place in the motion capture studio at Campus Deutz.
+The recording takes place in the motion capture studio at Campus Deutz with the \emph{OAK-D} camera positioned inside the capture volume as shown in \cref{fig:recording-setup}.
 For this purpose, the LED is attached to a pair of glasses together with a battery and a switch.
 The test data therefore consists of head movements.
 During the recordings, the LED moves within the area visible to the stereo camera at a distance of approx.\ 30~cm to 3~m.
@@ -127,6 +127,26 @@ In the usual formulation, $d = \operatorname{sgn} \det(\mathbf{V} \mathbf{U}^\to
 Here, however, the coordinate system of the stereo camera described above is left-handed, while that of the \emph{OptiTrack} system is right-handed.
 No proper rotation can map one onto the other, so $d = -\operatorname{sgn} \det(\mathbf{V} \mathbf{U}^\top)$ is chosen instead, which yields $\det \mathbf{R} = -1$, i.e., $\mathbf{R}$ contains a reflection in addition to a rotation.
 Without this adjustment, the tracked positions of the two systems are mirrored across the XY-plane.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}{0.49\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{assets/aligned-tracks.png}
+  \end{minipage}
+  \hfill
+  \begin{minipage}{0.49\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{assets/aligned-fitted-tracks.png}
+  \end{minipage}
+  \caption{LED tracks recorded by the \emph{OAK-D} (blue, green) and the \emph{OptiTrack} system (orange). Left: coordinate spaces aligned using the camera marker coordinates; a nearly constant offset between the tracks remains. Right: coordinate spaces aligned using the LED coordinates.}
+  \label{fig:aligned-tracks}
+\end{figure}
+
+To eliminate reference frame error (as seen in \cref{fig:aligned-tracks}), the LED coordinates may be used instead of the camera marker coordinates to align the coordinate spaces.
+Instead of matching the static camera marker coordinates to each other, one of the tracks is resampled to the frequency of the other using linear intepolation, discarding any segments in which either system lost track of the LED.
+The coordinates are then paired up, and the least squares problem as described above is solved on those pairs instead.
+Although this technique is not practically applicable because it requires a ground truth, it is useful when evaluating filtering techniques since they cannot possibly compensate for this type of error anyway.
 
 \section{Evaluation}
 \label{sec:evaluation}
